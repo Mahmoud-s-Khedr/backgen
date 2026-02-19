@@ -1,0 +1,65 @@
+/**
+ * Query Builder
+ * Converts URL query parameters into Prisma findMany arguments.
+ *
+ * Supports: pagination, sorting, filtering, and relation includes.
+ *
+ * Examples:
+ *   ?page=2&limit=20
+ *   ?sort=createdAt&order=desc
+ *   ?filter[status]=PUBLISHED&filter[authorId]=abc123
+ *   ?include=author,comments
+ */
+export interface QueryOptions {
+  where?: Record<string, any>;
+  orderBy?: Record<string, string>;
+  skip?: number;
+  take: number;
+  include?: Record<string, boolean>;
+  page: number;
+}
+
+export function buildQueryOptions(query: Record<string, any>): QueryOptions {
+  const page = Math.max(1, parseInt(query.page || '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit || '20', 10)));
+  const skip = (page - 1) * limit;
+
+  // Sorting
+  const sort = query.sort || 'id';
+  const order = query.order === 'asc' ? 'asc' : 'desc';
+  const orderBy = { [sort]: order };
+
+  // Filtering
+  const where: Record<string, any> = {};
+  if (query.filter && typeof query.filter === 'object') {
+    for (const [key, value] of Object.entries(query.filter)) {
+      if (typeof value === 'string') {
+        // Check if it looks like a number
+        const num = Number(value);
+        if (!isNaN(num)) {
+          where[key] = num;
+        } else if (value === 'true' || value === 'false') {
+          where[key] = value === 'true';
+        } else {
+<% if (datasource.provider === 'postgresql' || datasource.provider === 'mysql') { %>
+          where[key] = { contains: value, mode: 'insensitive' };
+<% } else { %>
+          where[key] = { contains: value };
+<% } %>
+        }
+      }
+    }
+  }
+
+  // Includes
+  let include: Record<string, boolean> | undefined;
+  if (query.include) {
+    include = {};
+    const relations = query.include.split(',').map((r: string) => r.trim());
+    for (const relation of relations) {
+      include[relation] = true;
+    }
+  }
+
+  return { where, orderBy, skip, take: limit, include, page };
+}

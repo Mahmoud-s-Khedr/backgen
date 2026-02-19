@@ -1,0 +1,53 @@
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env.js';
+import { ProblemDetail } from './error.middleware.js';
+
+// Extend Express Request to include user info
+declare global {
+  namespace Express {
+    interface Request {
+      user?: jwt.JwtPayload;
+    }
+  }
+}
+
+/**
+ * JWT Authentication Middleware
+ * Verifies Bearer token and attaches decoded user to request.
+ */
+export function authMiddleware(req: Request, _res: Response, next: NextFunction): void {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next(new ProblemDetail({
+      type: 'unauthorized',
+      title: 'Unauthorized',
+      status: 401,
+      detail: 'Missing or invalid Authorization header. Expected: Bearer <token>',
+    }));
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET) as jwt.JwtPayload;
+    req.user = decoded;
+    next();
+  } catch (error) {
+    if (error instanceof jwt.TokenExpiredError) {
+      return next(new ProblemDetail({
+        type: 'token-expired',
+        title: 'Token Expired',
+        status: 401,
+        detail: 'The authentication token has expired.',
+      }));
+    }
+    return next(new ProblemDetail({
+      type: 'invalid-token',
+      title: 'Invalid Token',
+      status: 401,
+      detail: 'The authentication token is invalid.',
+    }));
+  }
+}

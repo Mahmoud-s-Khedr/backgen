@@ -1,0 +1,105 @@
+import { Request, Response, NextFunction } from 'express';
+import { ZodError } from 'zod';
+import { Prisma } from '@prisma/client';
+import { logger } from '../config/logger.js';
+
+/**
+ * RFC 7807 Problem Detail for HTTP APIs.
+ */
+export class ProblemDetail extends Error {
+  type: string;
+  title: string;
+  status: number;
+  detail: string;
+  instance?: string;
+
+  constructor(opts: { type: string; title: string; status: number; detail: string; instance?: string }) {
+    super(opts.detail);
+    this.type = opts.type;
+    this.title = opts.title;
+    this.status = opts.status;
+    this.detail = opts.detail;
+    this.instance = opts.instance;
+    this.name = 'ProblemDetail';
+  }
+}
+
+/**
+ * Global error handling middleware.
+ * Converts errors to RFC 7807 Problem Detail responses.
+ */
+export function errorMiddleware(err: Error, req: Request, res: Response, _next: NextFunction): void {
+  // Already a ProblemDetail
+  if (err instanceof ProblemDetail) {
+    res.status(err.status).json({
+      type: err.type,
+      title: err.title,
+      status: err.status,
+      detail: err.detail,
+      instance: err.instance || req.originalUrl,
+    });
+    return;
+  }
+
+  // Zod validation error
+  if (err instanceof ZodError) {
+    res.status(422).json({
+      type: 'validation-error',
+      title: 'Validation Error',
+      status: 422,
+      detail: 'Request validation failed.',
+      instance: req.originalUrl,
+      errors: err.errors.map((e) => ({
+        path: e.path.join('.'),
+        message: e.message,
+        code: e.code,
+      })),
+    });
+    return;
+  }
+
+  // Prisma known request error
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    switch (err.code) {
+      case 'P2002':
+        res.status(409).json({
+          type: 'unique-constraint',
+          title: 'Unique Constraint Violation',
+          status: 409,
+          detail: 'A record with this value already exists.',
+          instance: req.originalUrl,
+        });
+        return;
+      case 'P2003':
+        res.status(422).json({
+          type: 'foreign-key-constraint',
+          title: 'Foreign Key Constraint Violation',
+          status: 422,
+          detail: 'A related record was not found.',
+          instance: req.originalUrl,
+        });
+        return;
+      case 'P2025':
+        res.status(404).json({
+          type: 'not-found',
+          title: 'Not Found',
+          status: 404,
+          detail: 'The requested record was not found.',
+          instance: req.originalUrl,
+        });
+        return;
+      default:
+        break;
+    }
+  }
+
+  // Unknown error
+  logger.error({ err, url: req.originalUrl, method: req.method }, 'Unhandled error');
+  res.status(500).json({
+    type: 'internal-server-error',
+    title: 'Internal Server Error',
+    status: 500,
+    detail: process.env.NODE_ENV === 'development' ? err.message : 'An unexpected error occurred.',
+    instance: req.originalUrl,
+  });
+}

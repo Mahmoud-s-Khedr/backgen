@@ -1,0 +1,60 @@
+import request from 'supertest';
+import { app } from '../../app.js';
+
+/**
+ * <%= model.name %> API Tests
+ * Scaffolded test file using supertest.
+ * TODO: Set up test database and implement proper test fixtures.
+ */
+describe('<%= model.name %> API', () => {
+  const basePath = '/api/<%= h.pluralize(h.toCamelCase(model.name)) %>';
+
+  describe('GET ' + basePath, () => {
+    it('should return a paginated list', async () => {
+      const response = await request(app)
+        .get(basePath)
+        .query({ page: 1, limit: 10 });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('data');
+      expect(response.body).toHaveProperty('meta');
+      expect(Array.isArray(response.body.data)).toBe(true);
+    });
+  });
+
+  describe('POST ' + basePath, () => {
+    it('should create a new <%= h.toCamelCase(model.name) %>', async () => {
+      // Minimal valid payload — required fields only (adjust values as needed)
+      const payload = {
+<% for (const field of createFields) { -%>
+<% if (field.isRelation || field.isOptional || field.hasDefault) continue; -%>
+<% const sampleValue = field.type === 'String' ? `'test-${field.name}'` : field.type === 'Int' || field.type === 'Float' || field.type === 'Decimal' ? '1' : field.type === 'Boolean' ? 'true' : field.type === 'DateTime' ? `'${new Date().toISOString()}'` : `'test-${field.name}'`; -%>
+        <%= field.name %>: <%= sampleValue %>,
+<% } -%>
+      };
+
+      const response = await request(app)
+        .post(basePath)
+        .send(payload)
+        .set('Content-Type', 'application/json');
+
+      expect(response.status).toBe(201);
+      expect(response.body).toHaveProperty('data');
+    });
+  });
+
+  describe('GET ' + basePath + '/:id', () => {
+    it('should return 404 for non-existent ID', async () => {
+      const response = await request(app).get(basePath + '/non-existent-id');
+      expect(response.status).toBe(404);
+      expect(response.body).toHaveProperty('status', 404);
+    });
+  });
+
+  describe('DELETE ' + basePath + '/:id', () => {
+    it('should return 404 for non-existent ID', async () => {
+      const response = await request(app).delete(basePath + '/non-existent-id');
+      expect(response.status).toBe(404);
+    });
+  });
+});

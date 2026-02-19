@@ -1,0 +1,104 @@
+import { Request, Response, NextFunction } from 'express';
+import { <%= model.name %>Service } from './<%= h.toCamelCase(model.name) %>.service.js';
+import { Create<%= model.name %>Schema, Update<%= model.name %>Schema, Patch<%= model.name %>Schema } from './<%= h.toCamelCase(model.name) %>.dto.js';
+import { buildQueryOptions } from '../../utils/query-builder.js';
+import { sendSuccess, sendCreated, sendNoContent } from '../../utils/response.js';
+import { ProblemDetail } from '../../middlewares/error.middleware.js';
+
+const service = new <%= model.name %>Service();
+
+/**
+ * <%= model.name %> Controller
+ * Handles HTTP request/response for the <%= model.name %> resource.
+ */
+export class <%= model.name %>Controller {
+  /**
+   * GET /api/<%= h.pluralize(h.toCamelCase(model.name)) %>
+   */
+  async list(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const options = buildQueryOptions(req.query);
+      const { data, total } = await service.findMany(options);
+      sendSuccess(res, data, {
+        page: options.page,
+        limit: options.take,
+        total,
+        totalPages: Math.ceil(total / (options.take || 20)),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/<%= h.pluralize(h.toCamelCase(model.name)) %>/:id
+   */
+  async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const options = buildQueryOptions(req.query);
+      const result = await service.findById(req.params.id, options.include);
+      if (!result) {
+        throw new ProblemDetail({
+          type: 'not-found',
+          title: 'Not Found',
+          status: 404,
+          detail: `<%= model.name %> with ID "${req.params.id}" not found.`,
+        });
+      }
+      sendSuccess(res, result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/<%= h.pluralize(h.toCamelCase(model.name)) %>
+   */
+  async create(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = Create<%= model.name %>Schema.parse(req.body);
+      const result = await service.create(validated);
+      sendCreated(res, result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * PUT /api/<%= h.pluralize(h.toCamelCase(model.name)) %>/:id
+   */
+  async update(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = Update<%= model.name %>Schema.parse(req.body);
+      const result = await service.update(req.params.id, validated);
+      sendSuccess(res, result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * PATCH /api/<%= h.pluralize(h.toCamelCase(model.name)) %>/:id
+   */
+  async patch(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = Patch<%= model.name %>Schema.parse(req.body);
+      const result = await service.update(req.params.id, validated);
+      sendSuccess(res, result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * DELETE /api/<%= h.pluralize(h.toCamelCase(model.name)) %>/:id
+   */
+  async remove(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      await service.delete(req.params.id);
+      sendNoContent(res);
+    } catch (error) {
+      next(error);
+    }
+  }
+}

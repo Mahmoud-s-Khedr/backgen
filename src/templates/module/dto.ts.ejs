@@ -1,0 +1,56 @@
+import { z } from 'zod';
+
+/**
+ * <%= model.name %> DTOs (Data Transfer Objects)
+ * Zod schemas for request validation and response shaping.
+ */
+<% for (const enumDef of enums) { -%>
+<% const usedByModel = model.fields.some(f => f.type === enumDef.name); -%>
+<% if (usedByModel) { -%>
+
+export const <%= enumDef.name %>Schema = z.enum([<%= enumDef.values.map(v => `'${v}'`).join(', ') %>]);
+<% } -%>
+<% } -%>
+
+/**
+ * Schema for creating a new <%= model.name %>.
+ * Required fields from the Prisma schema are required here.
+ * Optional fields (?) and fields with defaults are optional.
+ * @bcm.readonly fields are excluded.
+ */
+export const Create<%= model.name %>Schema = z.object({
+<% for (const field of createFields) { -%>
+<% if (field.isRelation) continue; -%>
+<% const enumDef = enums.find(e => e.name === field.type); const zodType = enumDef ? `${enumDef.name}Schema` : h.prismaToZodType(field.type); const isOpt = field.isOptional || field.hasDefault; -%>
+  <%= field.name %>: <%= zodType %><%= isOpt ? '.optional()' : '' %>,<%= field.isUnique ? ' // Must be unique' : '' %>
+<% } -%>
+});
+
+/**
+ * Schema for full update of a <%= model.name %>.
+ * Same validation as Create -- all required fields must be present.
+ */
+export const Update<%= model.name %>Schema = Create<%= model.name %>Schema;
+
+/**
+ * Schema for partial update (PATCH) of a <%= model.name %>.
+ * All fields are optional -- only provided fields are updated.
+ */
+export const Patch<%= model.name %>Schema = Create<%= model.name %>Schema.partial();
+
+/**
+ * Schema describing the API response shape for a <%= model.name %>.
+ * @bcm.hidden and @bcm.writeOnly fields are excluded.
+ */
+export const <%= model.name %>ResponseSchema = z.object({
+<% for (const field of responseFields) { -%>
+<% if (field.isRelation) continue; -%>
+<% const enumDef = enums.find(e => e.name === field.type); const zodType = enumDef ? `${enumDef.name}Schema` : h.prismaToZodType(field.type); -%>
+  <%= field.name %>: <%= zodType %><%= field.isOptional ? '.optional()' : '' %>,
+<% } -%>
+});
+
+export type Create<%= model.name %>Input = z.infer<typeof Create<%= model.name %>Schema>;
+export type Update<%= model.name %>Input = z.infer<typeof Update<%= model.name %>Schema>;
+export type Patch<%= model.name %>Input = z.infer<typeof Patch<%= model.name %>Schema>;
+export type <%= model.name %>Response = z.infer<typeof <%= model.name %>ResponseSchema>;

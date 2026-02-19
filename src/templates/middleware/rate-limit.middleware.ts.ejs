@@ -1,0 +1,14 @@
+import rateLimit from 'express-rate-limit';
+
+export const rateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    type: 'rate-limit-exceeded',
+    title: 'Too Many Requests',
+    status: 429,
+    detail: 'You have exceeded the rate limit. Please try again later.',
+  },
+});

@@ -1,0 +1,41 @@
+import { app } from './app.js';
+import { prisma } from './config/database.js';
+import { env } from './config/env.js';
+import { logger } from './config/logger.js';
+
+const PORT = env.PORT;
+
+async function main() {
+  // Verify database connection
+  await prisma.$connect();
+  logger.info('Database connected');
+
+  const server = app.listen(PORT, () => {
+    logger.info({ port: PORT }, 'Server started');
+    logger.info(`API docs: http://localhost:${PORT}/api/docs`);
+  });
+
+  // Graceful shutdown
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, 'Shutting down gracefully...');
+    server.close(async () => {
+      await prisma.$disconnect();
+      logger.info('Database disconnected');
+      process.exit(0);
+    });
+
+    // Force exit after 10s
+    setTimeout(() => {
+      logger.error('Forced shutdown after timeout');
+      process.exit(1);
+    }, 10_000);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+main().catch((error) => {
+  logger.fatal({ error }, 'Failed to start server');
+  process.exit(1);
+});

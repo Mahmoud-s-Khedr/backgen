@@ -1,0 +1,105 @@
+import { prisma } from '../../config/database.js';
+import type { QueryOptions } from '../../utils/query-builder.js';
+import { ProblemDetail } from '../../middlewares/error.middleware.js';
+import type { Create<%= model.name %>Input, Patch<%= model.name %>Input } from './<%= h.toCamelCase(model.name) %>.dto.js';
+
+/**
+ * <%= model.name %> Service
+ * Handles database operations for the <%= model.name %> model.
+ */
+export class <%= model.name %>Service {
+  /**
+   * Find many <%= h.pluralize(h.toCamelCase(model.name)) %> with pagination, sorting, and filtering.
+   */
+  async findMany(options: QueryOptions): Promise<{ data: unknown[]; total: number }> {
+    const [data, total] = await Promise.all([
+      prisma.<%= h.toCamelCase(model.name) %>.findMany({
+        where: options.where,
+        orderBy: options.orderBy,
+        skip: options.skip,
+        take: options.take,
+        include: options.include,
+      }),
+      prisma.<%= h.toCamelCase(model.name) %>.count({ where: options.where }),
+    ]);
+    return { data, total };
+  }
+
+  /**
+   * Find a single <%= h.toCamelCase(model.name) %> by ID.
+   */
+  async findById(id: string, include?: Record<string, boolean>): Promise<unknown | null> {
+    return prisma.<%= h.toCamelCase(model.name) %>.findUnique({
+      where: { id },
+      include,
+    });
+  }
+
+  /**
+   * Create a new <%= h.toCamelCase(model.name) %>.
+   */
+  async create(data: Create<%= model.name %>Input): Promise<unknown> {
+    try {
+      return await prisma.<%= h.toCamelCase(model.name) %>.create({ data });
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2002') {
+        throw new ProblemDetail({
+          type: 'unique-constraint',
+          title: 'Unique Constraint Violation',
+          status: 409,
+          detail: `A <%= h.toCamelCase(model.name) %> with this value already exists.`,
+        });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Update a <%= h.toCamelCase(model.name) %> by ID.
+   */
+  async update(id: string, data: Create<%= model.name %>Input | Patch<%= model.name %>Input): Promise<unknown> {
+    try {
+      return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: { id }, data });
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error) {
+        const code = (error as { code: string }).code;
+        if (code === 'P2025') {
+          throw new ProblemDetail({
+            type: 'not-found',
+            title: 'Not Found',
+            status: 404,
+            detail: `<%= model.name %> with ID "${id}" not found.`,
+          });
+        }
+        if (code === 'P2002') {
+          throw new ProblemDetail({
+            type: 'unique-constraint',
+            title: 'Unique Constraint Violation',
+            status: 409,
+            detail: `A <%= h.toCamelCase(model.name) %> with this value already exists.`,
+          });
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a <%= h.toCamelCase(model.name) %> by ID.
+   */
+  async delete(id: string): Promise<void> {
+    try {
+      await prisma.<%= h.toCamelCase(model.name) %>.delete({ where: { id } });
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2025') {
+        throw new ProblemDetail({
+          type: 'not-found',
+          title: 'Not Found',
+          status: 404,
+          detail: `<%= model.name %> with ID "${id}" not found.`,
+        });
+      }
+      throw error;
+    }
+  }
+}

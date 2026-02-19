@@ -1,0 +1,182 @@
+import { PrismaClient } from '@prisma/client';
+import { faker } from '@faker-js/faker';
+
+const prisma = new PrismaClient();
+
+/**
+ * Database Seed Script
+ * Run with: npm run seed
+ *
+ * Seeds <%= models.length %> model(s) with 5 records each.
+ * Insertion order is dependency-aware: parent tables are seeded first.
+ */
+<%
+// ── Template-time helpers ─────────────────────────────────────────────────────
+
+const enumNames = new Set(enums.map(e => e.name));
+
+/**
+ * Return a faker expression string for the given field name + Prisma type.
+ * Name-based heuristics take priority; type is used as a fallback.
+ * This function runs at template-render time — the returned string is
+ * emitted as a literal expression in the generated seed.ts.
+ */
+function fakerFor(fieldName, prismaType) {
+  const n = fieldName.toLowerCase();
+
+  // ── name-based heuristics ──────────────────────────────────────────────────
+  if (n === 'email' || n === 'emailaddress')
+    return "faker.internet.email()";
+  if (n === 'name' || n === 'fullname' || n === 'displayname')
+    return "faker.person.fullName()";
+  if (n === 'firstname')
+    return "faker.person.firstName()";
+  if (n === 'lastname' || n === 'surname')
+    return "faker.person.lastName()";
+  if (n === 'username' || n === 'handle' || n === 'login')
+    return "faker.internet.username()";
+  if (n === 'password' || n === 'passwordhash' || n === 'hashedpassword')
+    return "faker.internet.password({ length: 16 })";
+  if (n === 'phone' || n === 'phonenumber' || n === 'mobile')
+    return "faker.phone.number()";
+  if (n === 'title')
+    return "faker.lorem.sentence({ min: 3, max: 6 })";
+  if (n === 'slug' || n === 'permalink')
+    return "faker.helpers.slugify(faker.lorem.words(3))";
+  if (n === 'content' || n === 'body' || n === 'text')
+    return "faker.lorem.paragraphs(2)";
+  if (n === 'description' || n === 'excerpt' || n === 'summary' || n === 'bio' || n === 'about' || n === 'note' || n === 'notes')
+    return "faker.lorem.sentences(2)";
+  if (n.includes('url') || n === 'website' || n === 'link' || n === 'homepage')
+    return "faker.internet.url()";
+  if (n === 'color' || n === 'colour')
+    return "faker.internet.color()";
+  if (n === 'city' || n === 'location')
+    return "faker.location.city()";
+  if (n === 'address' || n === 'streetaddress')
+    return "faker.location.streetAddress()";
+  if (n === 'zipcode' || n === 'postalcode' || n === 'zip')
+    return "faker.location.zipCode()";
+  if (n === 'country')
+    return "faker.location.country()";
+  if (n === 'price' || n === 'amount' || n === 'cost' || n === 'total' || n === 'balance')
+    return "faker.number.float({ min: 1, max: 1000, fractionDigits: 2 })";
+  if (n === 'quantity' || n === 'count' || n === 'viewcount' || n === 'hits' || n === 'stock')
+    return "faker.number.int({ min: 0, max: 1000 })";
+  if (n === 'rating')
+    return "faker.number.float({ min: 1, max: 5, fractionDigits: 1 })";
+  if (n === 'score' || n === 'points' || n === 'rank')
+    return "faker.number.int({ min: 0, max: 100 })";
+  if (n === 'age')
+    return "faker.number.int({ min: 18, max: 80 })";
+
+  // ── type-based fallbacks ───────────────────────────────────────────────────
+  if (prismaType === 'String')                      return "faker.lorem.word()";
+  if (prismaType === 'Int')                         return "faker.number.int({ min: 1, max: 100 })";
+  if (prismaType === 'Float' || prismaType === 'Decimal')
+                                                    return "faker.number.float({ min: 0, max: 100, fractionDigits: 2 })";
+  if (prismaType === 'Boolean')                     return "faker.datatype.boolean()";
+  if (prismaType === 'DateTime')                    return "faker.date.recent().toISOString()";
+  if (prismaType === 'BigInt')                      return "BigInt(faker.number.int({ min: 1, max: 1000000 }))";
+  if (prismaType === 'Bytes')                       return "Buffer.from(faker.string.alphanumeric(16))";
+  return "{}"; // Json or unknown — empty object
+}
+
+// Pre-compute FK maps and track which parent IDs have been fetched
+const allFkMaps = {};
+for (const m of models) {
+  const fkMap = {};
+  for (const f of m.fields) {
+    if (!f.isRelation || f.isList || enumNames.has(f.type) || f.type === m.name) continue;
+    const fkName = f.name + 'Id';
+    if (m.fields.some(sf => sf.name === fkName && !sf.isRelation)) {
+      fkMap[fkName] = f.type;
+    }
+  }
+  allFkMaps[m.name] = fkMap;
+}
+const fetchedParents = new Set(); // track which parent models have been cached
+%>
+
+async function main() {
+  console.log('Seeding database...');
+  // Clean up existing data (reverse dependency order for FK integrity)
+<% for (const model of [...models].reverse()) { -%>
+  await prisma.<%= h.toCamelCase(model.name) %>.deleteMany();
+<% } -%>
+  // parentIds[ModelName] = array of seeded IDs, populated as each parent table is seeded
+  const parentIds: Record<string, string[]> = {};
+<% for (const model of models) { -%>
+<%
+  const modelVar = h.toCamelCase(model.name);
+  const fkMap = allFkMaps[model.name];
+  const fkTargets = [...new Set(Object.values(fkMap))];
+
+  // Fields to include in prisma.create({ data: { ... } })
+  const seedFields = model.fields.filter(f =>
+    !f.isId &&
+    !f.hasDefault &&
+    !f.isRelation &&
+    !f.isList &&
+    !f.directives.includes('readonly')
+  );
+
+  // Enum fields for this model (parser marks enums as isRelation; distinguish by enumNames)
+  const enumSeedFields = model.fields.filter(f =>
+    f.isRelation &&
+    !f.isList &&
+    enumNames.has(f.type) &&
+    !f.hasDefault &&
+    !f.directives.includes('readonly')
+  );
+
+  // Only fetch parent IDs that haven't been fetched yet
+  const newParentsToFetch = fkTargets.filter(t => !fetchedParents.has(t));
+  for (const p of newParentsToFetch) fetchedParents.add(p);
+%>
+
+  // ── Seed <%= model.name %> ──────────────────────────────────────────────────
+<% if (newParentsToFetch.length > 0) { %>
+  // Fetch IDs from newly seeded parent table(s)
+<% for (const targetModel of newParentsToFetch) { -%>
+  parentIds['<%= targetModel %>'] = (
+    await prisma.<%= h.toCamelCase(targetModel) %>.findMany({ select: { id: true } })
+  ).map((r) => r.id);
+<% } %>
+<% } -%>
+  for (let i = 0; i < 5; i++) {
+    await prisma.<%= modelVar %>.create({
+      data: {
+<% for (const field of seedFields) { -%>
+<% if (fkMap[field.name]) { -%>
+        <%= field.name %>: parentIds['<%= fkMap[field.name] %>'][i % parentIds['<%= fkMap[field.name] %>'].length],<% if (field.isOptional) { %> // optional<% } %>
+
+<% } else { -%>
+        <%= field.name %>: <%= fakerFor(field.name, field.type) %>,<% if (field.isOptional) { %> // optional<% } %>
+
+<% } -%>
+<% } -%>
+<% for (const ef of enumSeedFields) { -%>
+<%   const enumDef = enums.find(e => e.name === ef.type); -%>
+<%   if (enumDef) { -%>
+        <%= ef.name %>: faker.helpers.arrayElement([<%= enumDef.values.map(v => `'${v}'`).join(', ') %>]),<% if (ef.isOptional) { %> // optional<% } %>
+
+<%   } -%>
+<% } -%>
+      },
+    });
+  }
+  console.log('Seeded <%= model.name %>: 5 records');
+<% } %>
+
+  console.log('Seeding complete.');
+}
+
+main()
+  .catch((error) => {
+    console.error('Seeding failed:', error);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

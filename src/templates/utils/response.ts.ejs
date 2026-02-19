@@ -1,0 +1,31 @@
+import { Response } from 'express';
+
+interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+/**
+ * Send a success response (200 OK).
+ */
+export function sendSuccess(res: Response, data: any, meta?: PaginationMeta): void {
+  const body: any = { data };
+  if (meta) body.meta = meta;
+  res.status(200).json(body);
+}
+
+/**
+ * Send a created response (201 Created).
+ */
+export function sendCreated(res: Response, data: any): void {
+  res.status(201).json({ data });
+}
+
+/**
+ * Send a no-content response (204 No Content).
+ */
+export function sendNoContent(res: Response): void {
+  res.status(204).send();
+}
