@@ -1,14 +1,23 @@
 import request from 'supertest';
 import { app } from '../../app.js';
+<% if (isProtected) { -%>
+import jwt from 'jsonwebtoken';
+import { env } from '../../config/env.js';
+<% } -%>
 
 /**
  * <%= model.name %> API Tests
  * Scaffolded test file using supertest.
  * TODO: Set up test database and implement proper test fixtures.
  */
+<% if (isProtected) { -%>
+const _authToken = jwt.sign({ id: 'test-user-id', role: 'USER' }, env.JWT_SECRET);
+<% } -%>
+const _testId = Date.now().toString(36);
+
 <%
 function sampleValue(field) {
-  if (field.type === 'String') return `'test-${field.name}'`;
+  if (field.type === 'String') return `'test-${field.name}-' + _testId`;
   if (field.type === 'Int') return '1';
   if (field.type === 'Float' || field.type === 'Decimal') return '1.5';
   if (field.type === 'Boolean') return 'true';
@@ -23,15 +32,68 @@ function sampleValue(field) {
 
 const requiredCreateFields = createFields.filter(f => !f.isRelation && !f.isOptional && !f.hasDefault);
 const optionalCreateFields = createFields.filter(f => !f.isRelation && (f.isOptional || f.hasDefault));
+
+// Build FK dependency info: which required scalar fields are FKs, and what parent model they reference
+const fkDeps = [];
+for (const relField of relationFields) {
+  if (relField.isList || !relField.relationField) continue;
+  const reqFkField = requiredCreateFields.find(f => f.name === relField.relationField);
+  if (!reqFkField) continue;
+  // Avoid duplicates (e.g. two relations to the same model)
+  if (fkDeps.find(d => d.varName === '_' + relField.type.charAt(0).toLowerCase() + relField.type.slice(1) + 'Id')) continue;
+
+  const targetModel = relField.type;
+  const targetModelDef = allModels.find(m => m.name === targetModel);
+  if (!targetModelDef) continue;
+
+  // Compute the minimal required payload for the parent model (no FKs, no server defaults, no id)
+  const targetFkFieldNames = targetModelDef.fields.map(f => f.relationField).filter(Boolean);
+  const targetRequired = targetModelDef.fields.filter(f =>
+    !f.isRelation &&
+    !f.isId &&
+    !f.directives.includes('hidden') &&
+    !f.directives.includes('readonly') &&
+    (!f.isServerDefault || f.directives.includes('writeOnly')) &&
+    !f.isOptional &&
+    !f.hasDefault &&
+    !targetFkFieldNames.includes(f.name)
+  );
+
+  fkDeps.push({
+    fkFieldName: relField.relationField,
+    targetModel,
+    targetPath: '/api/' + h.pluralize(h.toCamelCase(targetModel)),
+    varName: '_' + targetModel.charAt(0).toLowerCase() + targetModel.slice(1) + 'Id',
+    targetRequired,
+  });
+}
 -%>
+<% for (const dep of fkDeps) { -%>
+let <%= dep.varName %>: string;
+<% } -%>
 describe('<%= model.name %> API', () => {
   const basePath = '/api/<%= h.pluralize(h.toCamelCase(model.name)) %>';
-
+<% if (fkDeps.length > 0) { %>
+  beforeAll(async () => {
+<% for (const dep of fkDeps) { %>    // Create a parent <%= dep.targetModel %> record required by the <%= dep.fkFieldName %> FK field
+    const _<%= dep.targetModel.toLowerCase() %>Res = await request(app)
+      .post('<%= dep.targetPath %>')
+      .send({
+<% for (const f of dep.targetRequired) { -%>
+        <%= f.name %>: <%- sampleValue(f) %>,
+<% } -%>
+      })
+      .set('Content-Type', 'application/json');
+    <%= dep.varName %> = _<%= dep.targetModel.toLowerCase() %>Res.body.data?.id;
+<% } %>  });
+<% } %>
   /** Helper: build a valid payload with required fields */
   function validPayload() {
     return {
-<% for (const field of requiredCreateFields) { -%>
-      <%= field.name %>: <%- sampleValue(field) %>,
+<% for (const field of requiredCreateFields) {
+  const fkDep = fkDeps.find(d => d.fkFieldName === field.name);
+-%>
+      <%= field.name %>: <%- fkDep ? fkDep.varName : sampleValue(field) %>,
 <% } -%>
     };
   }
@@ -56,7 +118,8 @@ describe('<%= model.name %> API', () => {
       const response = await request(app)
         .post(basePath)
         .send(validPayload())
-        .set('Content-Type', 'application/json');
+        .set('Content-Type', 'application/json')<% if (isProtected) { %>
+        .set('Authorization', `Bearer ${_authToken}`)<% } %>;
 
       expect(response.status).toBe(201);
       expect(response.body).toHaveProperty('data');
@@ -66,7 +129,8 @@ describe('<%= model.name %> API', () => {
       const response = await request(app)
         .post(basePath)
         .send({})
-        .set('Content-Type', 'application/json');
+        .set('Content-Type', 'application/json')<% if (isProtected) { %>
+        .set('Authorization', `Bearer ${_authToken}`)<% } %>;
 
       expect(response.status).toBe(422);
       expect(response.body).toHaveProperty('type', 'validation-error');
@@ -87,7 +151,8 @@ describe('<%= model.name %> API', () => {
       const response = await request(app)
         .put(basePath + '/non-existent-id')
         .send(validPayload())
-        .set('Content-Type', 'application/json');
+        .set('Content-Type', 'application/json')<% if (isProtected) { %>
+        .set('Authorization', `Bearer ${_authToken}`)<% } %>;
 
       expect(response.status).toBe(404);
     });
@@ -96,7 +161,8 @@ describe('<%= model.name %> API', () => {
       const response = await request(app)
         .put(basePath + '/some-id')
         .send({})
-        .set('Content-Type', 'application/json');
+        .set('Content-Type', 'application/json')<% if (isProtected) { %>
+        .set('Authorization', `Bearer ${_authToken}`)<% } %>;
 
       expect(response.status).toBe(422);
     });
@@ -107,7 +173,8 @@ describe('<%= model.name %> API', () => {
       const response = await request(app)
         .patch(basePath + '/non-existent-id')
         .send({ <%= requiredCreateFields.length > 0 ? `${requiredCreateFields[0].name}: ${sampleValue(requiredCreateFields[0])}` : '' %> })
-        .set('Content-Type', 'application/json');
+        .set('Content-Type', 'application/json')<% if (isProtected) { %>
+        .set('Authorization', `Bearer ${_authToken}`)<% } %>;
 
       expect(response.status).toBe(404);
     });
@@ -115,7 +182,9 @@ describe('<%= model.name %> API', () => {
 
   describe('DELETE ' + basePath + '/:id', () => {
     it('should return 404 for non-existent ID', async () => {
-      const response = await request(app).delete(basePath + '/non-existent-id');
+      const response = await request(app)
+        .delete(basePath + '/non-existent-id')<% if (isProtected) { %>
+        .set('Authorization', `Bearer ${_authToken}`)<% } %>;
       expect(response.status).toBe(404);
     });
   });
