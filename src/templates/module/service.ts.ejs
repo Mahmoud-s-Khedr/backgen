@@ -23,6 +23,7 @@ export class <%= model.name %>Service {
         orderBy: options.orderBy,
         skip: options.skip,
         take: options.take,
+        // @ts-ignore -- Prisma types `include` as `never` for models without relations
         include: options.include,
       }),
 <% if (isSoftDelete) { %>
@@ -44,6 +45,7 @@ export class <%= model.name %>Service {
 <% } else { %>
       where: { id },
 <% } %>
+      // @ts-ignore -- Prisma types `include` as `never` for models without relations
       include,
     });
   }

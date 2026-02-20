@@ -9,7 +9,7 @@ const service = new <%= model.name %>Service();
 
 /** Allowed fields for filtering and sorting — prevents querying on hidden/writeOnly fields. */
 const ALLOWED_FILTER_FIELDS = [<%- filterableFields.map(f => `'${f}'`).join(', ') %>];
-const SEARCHABLE_FIELDS = [<%- searchableFields.map(f => `'${f}'`).join(', ') %>];
+const SEARCHABLE_FIELDS: string[] = [<%- searchableFields.map(f => `'${f}'`).join(', ') %>];
 
 /**
  * <%= model.name %> Controller

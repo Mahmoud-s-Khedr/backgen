@@ -74,7 +74,7 @@ export const <%= model.name %>ResponseSchema = z.object({
 <% for (const field of responseFields) { -%>
 <% if (field.isRelation) continue; -%>
 <% const enumDef = enums.find(e => e.name === field.type); const zodType = enumDef ? `${enumDef.name}Schema` : (field.type === 'DateTime' ? 'z.coerce.date()' : h.prismaToZodType(field.type)); -%>
-  <%= field.name %>: <%= zodType %><%= (field.isOptional || field.hasDefault) ? '.optional()' : '' %>,
+  <%= field.name %>: <%= zodType %><%= field.isOptional ? '.nullish()' : (field.hasDefault ? '.optional()' : '') %>,
 <% } -%>
 });
 

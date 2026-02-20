@@ -49,5 +49,9 @@ export function generateInfraFiles(schema: ParsedSchema, options?: GenerateOptio
             path: 'README.md',
             content: renderTemplate('infra/README.md.ejs', data),
         },
+        {
+            path: 'vitest.config.ts',
+            content: renderTemplate('vitest.config.ts.ejs', data),
+        },
     ];
 }
