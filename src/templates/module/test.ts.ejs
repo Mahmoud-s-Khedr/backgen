@@ -1,6 +1,31 @@
+<%
+// Preliminary: detect if jwt/env imports are needed (current model or any transitive FK dep is auth-guarded).
+// This block runs first so _needsAuthImport is available for the import section below.
+function _modelNeedsAuth(md) {
+  return md && (md.directives.includes('protected') || md.directives.includes('auth'));
+}
+function _hasAuthDep(modelName, vis) {
+  if (!vis) vis = new Set();
+  if (vis.has(modelName)) return false;
+  vis.add(modelName);
+  const md = allModels.find(m => m.name === modelName);
+  if (!md) return false;
+  for (const rf of md.fields) {
+    if (rf.isList || !rf.relationField) continue;
+    const fk = md.fields.find(f => f.name === rf.relationField);
+    if (!fk || fk.isOptional || fk.hasDefault || fk.isServerDefault) continue;
+    const pmd = allModels.find(m => m.name === rf.type);
+    if (!pmd) continue;
+    if (_modelNeedsAuth(pmd)) return true;
+    if (_hasAuthDep(rf.type, vis)) return true;
+  }
+  return false;
+}
+const _needsAuthImport = isProtected || _hasAuthDep(model.name);
+%>
 import request from 'supertest';
 import { app } from '../../app.js';
-<% if (isProtected) { -%>
+<% if (_needsAuthImport) { -%>
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env.js';
 <% } -%>
@@ -11,7 +36,7 @@ import { env } from '../../config/env.js';
  * TODO: Set up test database and implement proper test fixtures.
  */
 <% if (isProtected) { -%>
-const _authToken = jwt.sign({ id: 'test-user-id', role: 'USER' }, env.JWT_SECRET);
+const _authToken = jwt.sign({ id: 'test-user-id', role: '<%= authRoles.length > 0 ? authRoles[0] : "USER" %>' }, env.JWT_SECRET);
 <% } -%>
 const _testId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
@@ -90,11 +115,15 @@ function computeAllDeps(startModelName) {
           return { name: f.name, isFK: false, field: f };
         });
 
+      const parentIsAuth = parentModelDef.directives.includes('protected') || parentModelDef.directives.includes('auth');
+      const parentAuthRoles = parentModelDef.authRoles ?? [];
       allDepsOrdered.push({
         targetModel: relField.type,
         varName: parentVarName,
         apiPath: '/api/' + h.pluralize(h.toCamelCase(relField.type)),
         fields: parentRequiredFields,
+        needsAuth: parentIsAuth,
+        depAuthRoles: parentAuthRoles,
       });
     }
   }
@@ -104,6 +133,15 @@ function computeAllDeps(startModelName) {
 }
 
 const allDeps = computeAllDeps(model.name);
+
+// Compute the role to use when creating protected parent records in beforeAll.
+// Use the first role from any @bcm.auth dep; fall back to 'USER' for @bcm.protected (any valid JWT).
+const _setupTokenRole = (() => {
+  for (const dep of allDeps) {
+    if (dep.needsAuth && dep.depAuthRoles.length > 0) return dep.depAuthRoles[0];
+  }
+  return 'USER';
+})();
 
 // Direct FK deps of the current model only (for validPayload)
 const directFkDeps = [];
@@ -118,6 +156,9 @@ for (const relField of relationFields) {
   });
 }
 -%>
+<% if (allDeps.some(d => d.needsAuth)) { -%>
+const _setupToken = jwt.sign({ id: 'test-user-id', role: '<%= _setupTokenRole %>' }, env.JWT_SECRET);
+<% } -%>
 <% for (const dep of allDeps) { -%>
 let <%= dep.varName %>: string;
 <% } -%>
@@ -137,7 +178,8 @@ describe('<%= model.name %> API', () => {
 <% } -%>
 <% } -%>
       })
-      .set('Content-Type', 'application/json');
+      .set('Content-Type', 'application/json')<% if (dep.needsAuth) { %>
+      .set('Authorization', `Bearer ${_setupToken}`)<% } %>;
     <%= dep.varName %> = _<%= dep.targetModel.toLowerCase() %>Res.body.data?.id;
 <% } %>  });
 <% } %>
