@@ -3,7 +3,7 @@
 // Demonstrates: many-to-many relations, junction table, @bcm.searchable, @bcm.readonly, MySQL provider
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

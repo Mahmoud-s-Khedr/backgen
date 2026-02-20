@@ -13,7 +13,7 @@ import { env } from '../../config/env.js';
 <% if (isProtected) { -%>
 const _authToken = jwt.sign({ id: 'test-user-id', role: 'USER' }, env.JWT_SECRET);
 <% } -%>
-const _testId = Date.now().toString(36);
+const _testId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
 <%
 function sampleValue(field) {
@@ -33,54 +33,108 @@ function sampleValue(field) {
 const requiredCreateFields = createFields.filter(f => !f.isRelation && !f.isOptional && !f.hasDefault);
 const optionalCreateFields = createFields.filter(f => !f.isRelation && (f.isOptional || f.hasDefault));
 
-// Build FK dependency info: which required scalar fields are FKs, and what parent model they reference
-const fkDeps = [];
+// Build a topologically-sorted list of ALL models that must be created before the current one,
+// including transitive FK dependencies (e.g. Task→Project→User).
+// Each entry: { targetModel, varName, apiPath, fields: [{name, isFK, depVarName?, field?}] }
+function computeAllDeps(startModelName) {
+  const allDepsOrdered = [];
+  const processedModels = new Set();
+
+  function visit(modelName) {
+    if (processedModels.has(modelName)) return;
+    processedModels.add(modelName);
+
+    const modelDef = allModels.find(m => m.name === modelName);
+    if (!modelDef) return;
+
+    for (const relField of modelDef.fields) {
+      if (relField.isList || !relField.relationField) continue;
+      const fkScalarField = modelDef.fields.find(f => f.name === relField.relationField);
+      // Only handle required (non-optional, no default, no server default) FK fields
+      if (!fkScalarField || fkScalarField.isOptional || fkScalarField.hasDefault || fkScalarField.isServerDefault) continue;
+
+      // Recurse into parent's deps BEFORE adding parent itself (topological order)
+      visit(relField.type);
+
+      const parentVarName = '_' + relField.type.charAt(0).toLowerCase() + relField.type.slice(1) + 'Id';
+      if (allDepsOrdered.find(d => d.varName === parentVarName)) continue;
+
+      const parentModelDef = allModels.find(m => m.name === relField.type);
+      if (!parentModelDef) continue;
+
+      // Build the payload field list for creating the parent model:
+      // required non-id non-readonly non-hidden non-serverDefault fields.
+      // FK scalar fields are flagged with isFK=true and reference their dep's varName.
+      const parentRequiredFields = parentModelDef.fields
+        .filter(f =>
+          !f.isRelation &&
+          !f.isId &&
+          !f.isOptional &&
+          !f.hasDefault &&
+          !f.isServerDefault &&
+          !f.directives.includes('hidden') &&
+          !f.directives.includes('readonly')
+        )
+        .map(f => {
+          // Is this field a FK? (i.e. it is the relationField of some required non-list relation)
+          const owningRelation = parentModelDef.fields.find(
+            rf => rf.isRelation && !rf.isList && rf.relationField === f.name
+          );
+          if (owningRelation) {
+            const sfk = parentModelDef.fields.find(sf => sf.name === f.name);
+            if (sfk && !sfk.isOptional && !sfk.hasDefault && !sfk.isServerDefault) {
+              const depVarName = '_' + owningRelation.type.charAt(0).toLowerCase() + owningRelation.type.slice(1) + 'Id';
+              return { name: f.name, isFK: true, depVarName };
+            }
+          }
+          return { name: f.name, isFK: false, field: f };
+        });
+
+      allDepsOrdered.push({
+        targetModel: relField.type,
+        varName: parentVarName,
+        apiPath: '/api/' + h.pluralize(h.toCamelCase(relField.type)),
+        fields: parentRequiredFields,
+      });
+    }
+  }
+
+  visit(startModelName);
+  return allDepsOrdered;
+}
+
+const allDeps = computeAllDeps(model.name);
+
+// Direct FK deps of the current model only (for validPayload)
+const directFkDeps = [];
 for (const relField of relationFields) {
   if (relField.isList || !relField.relationField) continue;
   const reqFkField = requiredCreateFields.find(f => f.name === relField.relationField);
   if (!reqFkField) continue;
-  // Avoid duplicates (e.g. two relations to the same model)
-  if (fkDeps.find(d => d.varName === '_' + relField.type.charAt(0).toLowerCase() + relField.type.slice(1) + 'Id')) continue;
-
-  const targetModel = relField.type;
-  const targetModelDef = allModels.find(m => m.name === targetModel);
-  if (!targetModelDef) continue;
-
-  // Compute the minimal required payload for the parent model (no FKs, no server defaults, no id)
-  const targetFkFieldNames = targetModelDef.fields.map(f => f.relationField).filter(Boolean);
-  const targetRequired = targetModelDef.fields.filter(f =>
-    !f.isRelation &&
-    !f.isId &&
-    !f.directives.includes('hidden') &&
-    !f.directives.includes('readonly') &&
-    (!f.isServerDefault || f.directives.includes('writeOnly')) &&
-    !f.isOptional &&
-    !f.hasDefault &&
-    !targetFkFieldNames.includes(f.name)
-  );
-
-  fkDeps.push({
+  if (directFkDeps.find(d => d.fkFieldName === relField.relationField)) continue;
+  directFkDeps.push({
     fkFieldName: relField.relationField,
-    targetModel,
-    targetPath: '/api/' + h.pluralize(h.toCamelCase(targetModel)),
-    varName: '_' + targetModel.charAt(0).toLowerCase() + targetModel.slice(1) + 'Id',
-    targetRequired,
+    varName: '_' + relField.type.charAt(0).toLowerCase() + relField.type.slice(1) + 'Id',
   });
 }
 -%>
-<% for (const dep of fkDeps) { -%>
+<% for (const dep of allDeps) { -%>
 let <%= dep.varName %>: string;
 <% } -%>
 describe('<%= model.name %> API', () => {
   const basePath = '/api/<%= h.pluralize(h.toCamelCase(model.name)) %>';
-<% if (fkDeps.length > 0) { %>
+<% if (allDeps.length > 0) { %>
   beforeAll(async () => {
-<% for (const dep of fkDeps) { %>    // Create a parent <%= dep.targetModel %> record required by the <%= dep.fkFieldName %> FK field
+<% for (const dep of allDeps) { %>    // Create parent <%= dep.targetModel %> (required by FK dependency chain)
     const _<%= dep.targetModel.toLowerCase() %>Res = await request(app)
-      .post('<%= dep.targetPath %>')
+      .post('<%= dep.apiPath %>')
       .send({
-<% for (const f of dep.targetRequired) { -%>
-        <%= f.name %>: <%- sampleValue(f) %>,
+<% for (const f of dep.fields) { -%>
+<% if (f.isFK) { -%>
+        <%= f.name %>: <%= f.depVarName %>,
+<% } else { -%>
+        <%= f.name %>: <%- sampleValue(f.field) %>,
+<% } -%>
 <% } -%>
       })
       .set('Content-Type', 'application/json');
@@ -91,7 +145,7 @@ describe('<%= model.name %> API', () => {
   function validPayload() {
     return {
 <% for (const field of requiredCreateFields) {
-  const fkDep = fkDeps.find(d => d.fkFieldName === field.name);
+  const fkDep = directFkDeps.find(d => d.fkFieldName === field.name);
 -%>
       <%= field.name %>: <%- fkDep ? fkDep.varName : sampleValue(field) %>,
 <% } -%>
