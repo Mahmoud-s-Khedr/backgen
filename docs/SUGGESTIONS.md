@@ -1,230 +1,141 @@
 # Backend Creator (bcm) — Suggestions for Improvement
 
+> **Status as of v1.1.0 (2026-02-19):** Items marked ✅ are implemented. Remaining items are still open.
+
 ## Immediate Fixes (Bug Fixes)
 
-### 1. Fix auth middleware export name
+### 1. ✅ DONE — Fix auth middleware export name
 
-**File**: `src/templates/middleware/auth.middleware.ts.ejs`
+Renamed `authMiddleware` → `authenticate` in `auth.middleware.ts.ejs`.
 
-Rename the exported function from `authMiddleware` to `authenticate` to match the import in `routes.ts.ejs`. This is a runtime-breaking bug for any model using `/// @bcm.protected`.
+### 2. ✅ DONE — Add field whitelist to query builder
 
-### 2. Add field whitelist to query builder
+`buildQueryOptions()` now accepts `allowedFilterFields` and `searchableFields`. Controllers define allowed fields from model metadata. Unknown filter keys are silently skipped.
 
-**File**: `src/templates/utils/query-builder.ts.ejs`
+### 3. ✅ DONE — Fix enum field `isRelation` flag
 
-Accept an array of allowed field names and reject filter keys that aren't in the list. The module generator should pass the model's scalar field names (excluding `hidden` and `writeOnly` fields) to the query builder.
+Added `isEnum: boolean` to `FieldDefinition`. Parser checks against enum names before marking fields as relations.
 
-```typescript
-// query-builder should accept:
-export function buildQueryOptions(
-  query: Record<string, unknown>,
-  allowedFilterFields: string[]  // Add this parameter
-): QueryOptions { ... }
-```
+### 4. ✅ DONE — Centralize scalar type definitions
 
-### 3. Fix enum field `isRelation` flag
+Shared `PRISMA_SCALAR_TYPES` Set exported from `template-engine.ts`, used by parser and type mappers.
 
-**File**: `src/parser/prisma-ast-parser.ts`
+### 5. ✅ DONE — Use generic types in response helpers
 
-Add an `isEnum` flag to `FieldDefinition` and check against the parsed enum names before marking fields as relations. This eliminates the need for `enumNames.has()` workarounds in templates.
+`sendSuccess<T>()`, `sendCreated<T>()` now use generics instead of `any`.
 
-### 4. Centralize scalar type definitions
+### 6. ✅ DONE — Add proper return types to services
 
-Create a shared `SCALAR_TYPES` constant (or a single `typeMapping` object) that all three consumers reference: `isNonScalarType()`, `prismaToZodType()`, and `prismaToTsType()`. This prevents them from drifting apart.
-
-### 5. Use generic types in response helpers
-
-**File**: `src/templates/utils/response.ts.ejs`
-
-```typescript
-export function sendSuccess<T>(res: Response, data: T, meta?: PaginationMeta): void { ... }
-```
-
-### 6. Add proper return types to services
-
-**File**: `src/templates/module/service.ts.ejs`
-
-Use Prisma's generated types instead of `unknown`:
-
-```typescript
-import type { <%= model.name %> } from '@prisma/client';
-
-async findMany(...): Promise<{ data: <%= model.name %>[]; total: number }>
-async findById(...): Promise<<%= model.name %> | null>
-```
+Services now import `type { Model } from '@prisma/client'` and use typed return values.
 
 ---
 
 ## Short-Term Improvements
 
-### 7. Write a test suite
+### 7. ✅ DONE — Write a test suite
 
-Add Vitest tests covering:
-- **Parser unit tests**: Verify prisma-ast-parser correctly extracts models, fields, relations, enums, and directives from sample schemas
-- **Directive parser tests**: Verify conflict detection, model-level vs field-level parsing, and warning generation
-- **Generator integration tests**: Run `bcm generate` on a sample schema and verify the output file structure, TypeScript compilation, and key code patterns
-- **Template engine tests**: Verify type mapping, pluralization, and helper functions
+119 tests across 4 Vitest test files:
+- `tests/prisma-ast-parser.test.ts` (25 tests): models, fields, relations, enums, directives, auth roles
+- `tests/directive-parser.test.ts` (21 tests): conflict detection, model/field-level parsing, auth, nested, warnings
+- `tests/generator.test.ts` (40 tests): full generation, `--only` flag, RBAC, multi-db, nested relations
+- `tests/template-engine.test.ts` (33 tests): type mappings, helpers, EJS rendering
 
-### 8. Use validation middleware in routes
+### 8. ✅ DONE — Use validation middleware in routes
 
-**Files**: `src/templates/module/routes.ts.ejs`, `src/templates/middleware/validation.middleware.ts.ejs`
+Routes now import DTO schemas and apply `validate()` middleware at the route level for POST, PUT, and PATCH.
 
-Move Zod validation from controllers to route-level middleware. This fails fast before the controller runs and makes the validation middleware template actually useful:
+### 9. ✅ DONE — Handle more Prisma error codes
 
-```typescript
-router.post('/', validate(CreateSchema, 'body'), (req, res, next) => controller.create(req, res, next));
-```
+Error middleware now uses a `PRISMA_ERROR_MAP` object with 9 error codes (P2000, P2002, P2003, P2005, P2006, P2011, P2014, P2021, P2025).
 
-### 9. Handle more Prisma error codes
+### 10. ✅ DONE — Fix project name extraction
 
-**File**: `src/templates/middleware/error.middleware.ts.ejs`
+Uses `path.resolve()` before `basename()` to handle `--output .` correctly.
 
-Add handlers for at least: P2005 (value too long), P2006 (invalid value), P2011 (null constraint), P2014 (relation violation), P2021 (table doesn't exist). Consider a mapping object instead of a switch statement for easier extension.
+### 11. ✅ DONE — Align `init` command with generated output
 
-### 10. Fix project name extraction
+Updated init's starter `package.json` to use `jest` for tests and `type: "module"`, matching the generated project's `package.json.ejs`. Also added the `generate` script.
 
-**File**: `src/generator/generators/infra-generator.ts`
-
-```typescript
-const resolvedPath = path.resolve(options?.output || '.');
-const projectName = basename(resolvedPath) || 'api-server';
-```
-
-### 11. Align `init` command with generated output
-
-**File**: `src/commands/init.ts`
-
-Update the starter `package.json` to match the scripts and dependencies that `bcm generate` produces. Users who run `bcm init` then `bcm generate` shouldn't see conflicting configurations.
-
-### 12. Add CI/CD to the CLI project itself
+### 12. OPEN — Add CI/CD to the CLI project itself
 
 Create `.github/workflows/ci.yml` for the backgen repository with: lint (`tsc --noEmit`), test (`vitest run`), build (`npm run build`), and a smoke test (generate from example schema and verify output compiles).
 
-### 13. Add missing repository files
+### 13. ✅ DONE — Add missing repository files
 
-- `LICENSE` — MIT license text in repo root
-- `CHANGELOG.md` — Document v1.0.0 features, Feb 2026 improvements
-- `CONTRIBUTING.md` — Development setup, PR process, coding conventions
+`LICENSE` (MIT), `CHANGELOG.md` (v1.0.0), and `CONTRIBUTING.md` (dev setup, conventions) now exist.
 
-### 14. Warn on unknown Prisma types
+### 14. ✅ DONE — Warn on unknown Prisma types
 
-**File**: `src/generator/template-engine.ts`
+`prismaToZodType()` now logs `console.warn()` when a type isn't in the mapping.
 
-Instead of silently falling back to `z.string()`, log a warning during generation so users know a field type wasn't recognized:
+### 15. ✅ DONE — Log CORS status in production
 
-```typescript
-if (!map[prismaType]) {
-  console.warn(`Warning: Unknown Prisma type "${prismaType}", defaulting to z.string()`);
-}
-```
-
-### 15. Log CORS status in production
-
-**File**: `src/templates/config/cors.ts.ejs`
-
-When CORS origin is disabled in production, log a warning at startup so developers know cross-origin requests will be blocked:
-
-```typescript
-if (process.env.NODE_ENV === 'production' && !process.env.CORS_ORIGIN) {
-  console.warn('CORS_ORIGIN not set — cross-origin requests are disabled in production');
-}
-```
+CORS template now logs a warning when `CORS_ORIGIN` is not set in production.
 
 ---
 
 ## Medium-Term Enhancements
 
-### 16. Configurable seed count
+### 16. ✅ DONE — Configurable seed count
 
-**File**: `src/templates/prisma/seed.ts.ejs`
+Seed script uses `SEED_COUNT` env var (default: 5).
 
-```typescript
-const SEED_COUNT = parseInt(process.env.SEED_COUNT || '5', 10);
-```
+### 17. ✅ DONE — Make JSON body limit configurable
 
-### 17. Make JSON body limit configurable
+`express.json({ limit: process.env.JSON_LIMIT || '1mb' })` — default lowered from 10mb.
 
-**File**: `src/templates/app.ts.ejs`
-
-```typescript
-app.use(express.json({ limit: process.env.JSON_LIMIT || '1mb' }));
-```
-
-Lower the default from 10 MB to 1 MB.
-
-### 18. Request ID propagation with AsyncLocalStorage
-
-**File**: `src/templates/app.ts.ejs`
+### 18. OPEN — Request ID propagation with AsyncLocalStorage
 
 Use Node.js `AsyncLocalStorage` to propagate the `X-Request-ID` through async contexts so that Pino logs inside services and Prisma queries include the request ID automatically.
 
-### 19. Add `@bcm.searchable` directive
+### 19. ✅ DONE — Add `@bcm.searchable` directive
 
-Allow marking specific fields as searchable. The query builder would only accept filter/search operations on these fields, providing both a whitelist mechanism and explicit API documentation.
+Fields marked `@bcm.searchable` are included in full-text search via `?search=term` query parameter. Query builder builds `OR` conditions across searchable fields.
 
-### 20. Add `@bcm.softDelete` directive
+### 20. ✅ DONE — Add `@bcm.softDelete` directive
 
-Generate a `deletedAt` field pattern where DELETE sets a timestamp instead of removing the record, and all queries automatically filter out soft-deleted records.
+Models with `@bcm.softDelete` use `deletedAt` timestamp pattern. DELETE sets timestamp instead of hard delete, all queries filter out soft-deleted records.
 
-### 21. Improve OpenAPI spec for optional fields
+### 21. ✅ DONE — Improve OpenAPI spec for optional fields
 
-**File**: `src/generator/generators/swagger-generator.ts`
+Optional Prisma fields now include `nullable: true` in the OpenAPI spec. Search query parameter documented on list endpoints.
 
-Mark optional Prisma fields as `nullable: true` in the OpenAPI spec. Include proper `required` arrays that only list truly required fields.
+### 22. ✅ DONE — Improve Prisma error messages with field details
 
-### 22. Improve Prisma error messages with field details
+Error middleware now extracts field info from `PrismaClientKnownRequestError.meta`: reads `meta.target` (P2002 unique violations) and `meta.field_name` (P2003 FK violations), appending the field name to the detail message and including a `fields` array in the response when available.
 
-**File**: `src/templates/module/service.ts.ejs`
+### 23. ✅ DONE — Warn on orphaned directives
 
-Parse Prisma error metadata to include which field caused the constraint violation:
+Field directives outside model blocks now emit a warning.
 
-```typescript
-const field = (error as { meta?: { target?: string[] } }).meta?.target?.[0] || 'unknown';
-detail: `Field '${field}' must be unique.`
-```
+### 24. ✅ DONE — Increase shutdown timeout and make it configurable
 
-### 23. Warn on orphaned directives
-
-**File**: `src/parser/directive-parser.ts`
-
-When a field directive (`/// @bcm.readonly`, etc.) appears outside any model block, emit a warning instead of silently ignoring it.
-
-### 24. Increase shutdown timeout and make it configurable
-
-**File**: `src/templates/server.ts.ejs`
-
-```typescript
-const SHUTDOWN_TIMEOUT = parseInt(process.env.SHUTDOWN_TIMEOUT || '30000', 10);
-setTimeout(() => { process.exit(1); }, SHUTDOWN_TIMEOUT);
-```
+`SHUTDOWN_TIMEOUT` env var (default: 30000ms, increased from 10000ms).
 
 ---
 
 ## Long-Term Vision
 
-### 25. Plugin / hook system
+### 25. OPEN — Plugin / hook system
 
-Allow users to extend the generation pipeline with custom templates or post-processing hooks. For example, a plugin could add a custom middleware, modify the generated service layer, or add additional endpoints beyond CRUD.
+Allow users to extend the generation pipeline with custom templates or post-processing hooks.
 
-### 26. Multiple output targets
+### 26. OPEN — Multiple output targets
 
-Beyond Express.js, support generating:
-- **Fastify** backend (similar structure, different framework)
-- **GraphQL** API (from the same Prisma schema)
-- **tRPC** endpoints (type-safe API layer)
+Support generating Fastify, GraphQL, or tRPC endpoints from the same Prisma schema.
 
-### 27. Composite key support
+### 27. OPEN — Composite key support
 
-Currently, `bcm` assumes a single `id` field per model. Support `@@id([field1, field2])` composite primary keys by generating appropriate route parameters, service methods, and DTOs.
+Support `@@id([field1, field2])` composite primary keys with appropriate route parameters, service methods, and DTOs.
 
-### 28. Custom template overrides
+### 28. OPEN — Custom template overrides
 
-Allow users to place custom templates in a `.bcm/templates/` directory that override the defaults. This would let teams customize generated code patterns without forking the CLI.
+Allow users to place custom templates in a `.bcm/templates/` directory that override the defaults.
 
-### 29. Watch mode for development
+### 29. OPEN — Watch mode for development
 
-Add a `bcm watch` command that monitors the Prisma schema file and re-generates the backend on changes, similar to how `prisma generate --watch` works.
+`bcm watch` command that monitors the Prisma schema file and re-generates on changes.
 
-### 30. Interactive schema builder
+### 30. OPEN — Interactive schema builder
 
-Add a `bcm add-model` command that interactively prompts for model name, fields, types, and directives, then appends the model to the existing Prisma schema.
+`bcm add-model` command that interactively prompts for model name, fields, types, and directives.

@@ -1,11 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import { <%= model.name %>Service } from './<%= h.toCamelCase(model.name) %>.service.js';
-import { Create<%= model.name %>Schema, Update<%= model.name %>Schema, Patch<%= model.name %>Schema } from './<%= h.toCamelCase(model.name) %>.dto.js';
+import { <%= model.name %>ResponseSchema } from './<%= h.toCamelCase(model.name) %>.dto.js';
 import { buildQueryOptions } from '../../utils/query-builder.js';
 import { sendSuccess, sendCreated, sendNoContent } from '../../utils/response.js';
 import { ProblemDetail } from '../../middlewares/error.middleware.js';
 
 const service = new <%= model.name %>Service();
+
+/** Allowed fields for filtering and sorting — prevents querying on hidden/writeOnly fields. */
+const ALLOWED_FILTER_FIELDS = [<%- filterableFields.map(f => `'${f}'`).join(', ') %>];
+const SEARCHABLE_FIELDS = [<%- searchableFields.map(f => `'${f}'`).join(', ') %>];
 
 /**
  * <%= model.name %> Controller
@@ -17,9 +21,10 @@ export class <%= model.name %>Controller {
    */
   async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const options = buildQueryOptions(req.query);
+      const options = buildQueryOptions(req.query, ALLOWED_FILTER_FIELDS, SEARCHABLE_FIELDS);
       const { data, total } = await service.findMany(options);
-      sendSuccess(res, data, {
+      const safeData = data.map((item: unknown) => <%= model.name %>ResponseSchema.parse(item));
+      sendSuccess(res, safeData, {
         page: options.page,
         limit: options.take,
         total,
@@ -35,7 +40,7 @@ export class <%= model.name %>Controller {
    */
   async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const options = buildQueryOptions(req.query);
+      const options = buildQueryOptions(req.query, ALLOWED_FILTER_FIELDS, SEARCHABLE_FIELDS);
       const result = await service.findById(req.params.id, options.include);
       if (!result) {
         throw new ProblemDetail({
@@ -45,7 +50,7 @@ export class <%= model.name %>Controller {
           detail: `<%= model.name %> with ID "${req.params.id}" not found.`,
         });
       }
-      sendSuccess(res, result);
+      sendSuccess(res, <%= model.name %>ResponseSchema.parse(result));
     } catch (error) {
       next(error);
     }
@@ -56,9 +61,8 @@ export class <%= model.name %>Controller {
    */
   async create(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const validated = Create<%= model.name %>Schema.parse(req.body);
-      const result = await service.create(validated);
-      sendCreated(res, result);
+      const result = await service.create(req.body);
+      sendCreated(res, <%= model.name %>ResponseSchema.parse(result));
     } catch (error) {
       next(error);
     }
@@ -69,9 +73,8 @@ export class <%= model.name %>Controller {
    */
   async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const validated = Update<%= model.name %>Schema.parse(req.body);
-      const result = await service.update(req.params.id, validated);
-      sendSuccess(res, result);
+      const result = await service.update(req.params.id, req.body);
+      sendSuccess(res, <%= model.name %>ResponseSchema.parse(result));
     } catch (error) {
       next(error);
     }
@@ -82,9 +85,8 @@ export class <%= model.name %>Controller {
    */
   async patch(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const validated = Patch<%= model.name %>Schema.parse(req.body);
-      const result = await service.update(req.params.id, validated);
-      sendSuccess(res, result);
+      const result = await service.update(req.params.id, req.body);
+      sendSuccess(res, <%= model.name %>ResponseSchema.parse(result));
     } catch (error) {
       next(error);
     }

@@ -24,11 +24,12 @@ async function main() {
       process.exit(0);
     });
 
-    // Force exit after 10s
+    // Force exit after timeout (configurable via SHUTDOWN_TIMEOUT env var)
+    const timeout = parseInt(process.env.SHUTDOWN_TIMEOUT || '30000', 10);
     setTimeout(() => {
       logger.error('Forced shutdown after timeout');
       process.exit(1);
-    }, 10_000);
+    }, timeout);
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));

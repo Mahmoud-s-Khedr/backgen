@@ -12,10 +12,11 @@ export function generateModuleFiles(schema: ParsedSchema): GeneratedFile[] {
         const modulePath = `src/modules/${modelLower}`;
 
         // Separate field categories for template use
+        // Enum fields are scalar-like (not relations)
         const scalarFields = model.fields.filter((f) => !f.isRelation);
         const relationFields = model.fields.filter((f) => f.isRelation);
         const createFields = scalarFields.filter(
-            (f) => !f.isId && !f.directives.includes('hidden') && !f.directives.includes('readonly') && (!f.hasDefault || f.directives.includes('writeOnly'))
+            (f) => !f.isId && !f.directives.includes('hidden') && !f.directives.includes('readonly') && (!f.isServerDefault || f.directives.includes('writeOnly'))
         );
         const responseFields = scalarFields.filter(
             (f) => !f.directives.includes('hidden') && !f.directives.includes('writeOnly')
@@ -24,7 +25,24 @@ export function generateModuleFiles(schema: ParsedSchema): GeneratedFile[] {
             .map((f) => f.relationField)
             .filter((f): f is string => f !== undefined);
 
-        const isProtected = model.directives.includes('protected');
+        // Filterable fields: scalar, non-hidden, non-writeOnly (safe for query filtering)
+        const filterableFields = scalarFields
+            .filter((f) => !f.directives.includes('hidden') && !f.directives.includes('writeOnly'))
+            .map((f) => f.name);
+
+        // Searchable fields: fields with @bcm.searchable directive
+        const searchableFields = scalarFields
+            .filter((f) => f.directives.includes('searchable'))
+            .map((f) => f.name);
+
+        const isProtected = model.directives.includes('protected') || model.directives.includes('auth');
+        const isSoftDelete = model.directives.includes('softDelete');
+        const authRoles = model.authRoles ?? [];
+
+        // Nested relations: single (non-list) relation fields with @bcm.nested directive
+        const nestedRelations = relationFields.filter(
+            (f) => f.directives.includes('nested') && !f.isList && f.relationModel
+        );
 
         const templateData = {
             model,
@@ -34,9 +52,14 @@ export function generateModuleFiles(schema: ParsedSchema): GeneratedFile[] {
             createFields,
             responseFields,
             fkFields,
+            filterableFields,
+            searchableFields,
+            nestedRelations,
             allModels: schema.models,
             enums: schema.enums,
             isProtected,
+            isSoftDelete,
+            authRoles,
         };
 
         files.push({

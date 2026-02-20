@@ -1,0 +1,172 @@
+// Example 9: Social Network
+// Complexity: Nine models with self-refs, polymorphic patterns, all directives
+// Demonstrates: self-referential relations, @bcm.searchable, @bcm.hidden, @bcm.writeOnly, @bcm.readonly, @bcm.protected, @bcm.auth(roles), @bcm.softDelete, @bcm.nested, enums
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.protected
+model User {
+  id             String         @id @default(uuid())
+  username       String         @unique
+  email          String         @unique
+  /// @bcm.searchable
+  displayName    String
+  /// @bcm.writeOnly
+  password       String
+  /// @bcm.hidden
+  phone          String?
+  bio            String?
+  avatarUrl      String?
+  posts          Post[]
+  comments       Comment[]
+  likes          Like[]
+  media          Media[]
+  sentMessages   Message[]      @relation("SentMessages")
+  conversations  Conversation[]
+  notifications  Notification[]
+  following      Follow[]       @relation("Following")
+  followers      Follow[]       @relation("Followers")
+  /// @bcm.readonly
+  createdAt      DateTime       @default(now())
+}
+
+/// @bcm.softDelete
+model Post {
+  id        String    @id @default(uuid())
+  /// @bcm.searchable
+  title     String?
+  /// @bcm.searchable
+  content   String
+  published Boolean   @default(false)
+  /// @bcm.nested
+  author    User      @relation(fields: [authorId], references: [id])
+  authorId  String
+  comments  Comment[]
+  likes     Like[]
+  media     Media[]
+  /// @bcm.readonly
+  createdAt DateTime  @default(now())
+  /// @bcm.readonly
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+/// @bcm.softDelete
+model Comment {
+  id        String    @id @default(uuid())
+  /// @bcm.searchable
+  body      String
+  author    User      @relation(fields: [authorId], references: [id])
+  authorId  String
+  post      Post      @relation(fields: [postId], references: [id])
+  postId    String
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  parentId  String?
+  replies   Comment[] @relation("CommentReplies")
+  likes     Like[]
+  /// @bcm.readonly
+  createdAt DateTime  @default(now())
+  /// @bcm.readonly
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  post      Post?    @relation(fields: [postId], references: [id])
+  postId    String?
+  comment   Comment? @relation(fields: [commentId], references: [id])
+  commentId String?
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@unique([userId, commentId])
+}
+
+model Follow {
+  id          String   @id @default(uuid())
+  follower    User     @relation("Following", fields: [followerId], references: [id])
+  followerId  String
+  following   User     @relation("Followers", fields: [followingId], references: [id])
+  followingId String
+  /// @bcm.readonly
+  createdAt   DateTime @default(now())
+
+  @@unique([followerId, followingId])
+}
+
+/// @bcm.protected
+model Message {
+  id             String       @id @default(uuid())
+  /// @bcm.searchable
+  body           String
+  sender         User         @relation("SentMessages", fields: [senderId], references: [id])
+  senderId       String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String
+  readAt         DateTime?
+  /// @bcm.readonly
+  createdAt      DateTime     @default(now())
+}
+
+/// @bcm.protected
+model Conversation {
+  id          String    @id @default(uuid())
+  title       String?
+  participants User[]
+  messages    Message[]
+  /// @bcm.readonly
+  createdAt   DateTime  @default(now())
+  /// @bcm.readonly
+  updatedAt   DateTime  @updatedAt
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  type      NotificationType
+  message   String
+  read      Boolean          @default(false)
+  user      User             @relation(fields: [userId], references: [id])
+  userId    String
+  /// @bcm.readonly
+  createdAt DateTime         @default(now())
+}
+
+model Media {
+  id        String    @id @default(uuid())
+  url       String
+  type      MediaType
+  caption   String?
+  user      User      @relation(fields: [userId], references: [id])
+  userId    String
+  post      Post?     @relation(fields: [postId], references: [id])
+  postId    String?
+  /// @bcm.readonly
+  createdAt DateTime  @default(now())
+}
+
+enum NotificationType {
+  LIKE
+  COMMENT
+  FOLLOW
+  MESSAGE
+  MENTION
+  SYSTEM
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+}

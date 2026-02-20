@@ -24,6 +24,19 @@ export class ProblemDetail extends Error {
   }
 }
 
+/** Prisma error code to HTTP response mapping */
+const PRISMA_ERROR_MAP: Record<string, { status: number; type: string; title: string; detail: string }> = {
+  P2000: { status: 422, type: 'value-too-long', title: 'Value Too Long', detail: 'The provided value is too long for the column.' },
+  P2002: { status: 409, type: 'unique-constraint', title: 'Unique Constraint Violation', detail: 'A record with this value already exists.' },
+  P2003: { status: 422, type: 'foreign-key-constraint', title: 'Foreign Key Constraint Violation', detail: 'A related record was not found.' },
+  P2005: { status: 422, type: 'invalid-field-value', title: 'Invalid Field Value', detail: 'The stored value is invalid for the field type.' },
+  P2006: { status: 422, type: 'invalid-value', title: 'Invalid Value', detail: 'The provided value is invalid for the field type.' },
+  P2011: { status: 422, type: 'null-constraint', title: 'Null Constraint Violation', detail: 'A required field received a null value.' },
+  P2014: { status: 422, type: 'relation-violation', title: 'Required Relation Violation', detail: 'A required relation is missing or invalid.' },
+  P2021: { status: 500, type: 'table-not-found', title: 'Table Not Found', detail: 'The underlying table does not exist. Run migrations.' },
+  P2025: { status: 404, type: 'not-found', title: 'Not Found', detail: 'The requested record was not found.' },
+};
+
 /**
  * Global error handling middleware.
  * Converts errors to RFC 7807 Problem Detail responses.
@@ -60,36 +73,25 @@ export function errorMiddleware(err: Error, req: Request, res: Response, _next: 
 
   // Prisma known request error
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
-    switch (err.code) {
-      case 'P2002':
-        res.status(409).json({
-          type: 'unique-constraint',
-          title: 'Unique Constraint Violation',
-          status: 409,
-          detail: 'A record with this value already exists.',
-          instance: req.originalUrl,
-        });
-        return;
-      case 'P2003':
-        res.status(422).json({
-          type: 'foreign-key-constraint',
-          title: 'Foreign Key Constraint Violation',
-          status: 422,
-          detail: 'A related record was not found.',
-          instance: req.originalUrl,
-        });
-        return;
-      case 'P2025':
-        res.status(404).json({
-          type: 'not-found',
-          title: 'Not Found',
-          status: 404,
-          detail: 'The requested record was not found.',
-          instance: req.originalUrl,
-        });
-        return;
-      default:
-        break;
+    const mapped = PRISMA_ERROR_MAP[err.code];
+    if (mapped) {
+      // Extract field info from Prisma error metadata
+      const meta = err.meta as Record<string, unknown> | undefined;
+      const target = (meta?.target as string[]) ?? [];
+      const fieldName = (meta?.field_name as string) ?? target[0];
+      const detail = fieldName
+        ? `${mapped.detail} Field: '${fieldName}'.`
+        : mapped.detail;
+
+      res.status(mapped.status).json({
+        type: mapped.type,
+        title: mapped.title,
+        status: mapped.status,
+        detail,
+        instance: req.originalUrl,
+        ...(target.length > 0 && { fields: target }),
+      });
+      return;
     }
   }
 

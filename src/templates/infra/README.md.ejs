@@ -2,7 +2,8 @@
 
 > Generated with [Backend Creator (bcm)](https://github.com/backend-creator)
 
-A production-ready Express.js REST API with TypeScript, Prisma ORM, and auto-generated Swagger documentation.
+<% const providerLabel = provider === 'mysql' ? 'MySQL' : provider === 'sqlite' ? 'SQLite' : provider === 'mongodb' ? 'MongoDB' : 'PostgreSQL'; -%>
+A production-ready Express.js REST API with TypeScript, Prisma ORM (<%= providerLabel %>), and auto-generated Swagger documentation.
 
 ## Models
 
@@ -19,9 +20,13 @@ npm install
 # Set up environment
 cp .env.example .env
 # Edit .env with your database URL and JWT secret
-
+<% if (provider === 'mongodb') { %>
+# Push database schema (MongoDB uses db push instead of migrations)
+npx prisma db push
+<% } else { %>
 # Run database migrations
 npx prisma migrate dev --name init
+<% } -%>
 
 # Start development server
 npm run dev

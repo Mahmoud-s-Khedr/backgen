@@ -2,12 +2,13 @@
  * Query Builder
  * Converts URL query parameters into Prisma findMany arguments.
  *
- * Supports: pagination, sorting, filtering, and relation includes.
+ * Supports: pagination, sorting, filtering, search, and relation includes.
  *
  * Examples:
  *   ?page=2&limit=20
  *   ?sort=createdAt&order=desc
  *   ?filter[status]=PUBLISHED&filter[authorId]=abc123
+ *   ?search=hello
  *   ?include=author,comments
  */
 export interface QueryOptions {
@@ -19,22 +20,31 @@ export interface QueryOptions {
   page: number;
 }
 
-export function buildQueryOptions(query: Record<string, any>): QueryOptions {
+export function buildQueryOptions(
+  query: Record<string, any>,
+  allowedFilterFields: string[] = [],
+  searchableFields: string[] = [],
+): QueryOptions {
   const page = Math.max(1, parseInt(query.page || '1', 10));
   const limit = Math.min(100, Math.max(1, parseInt(query.limit || '20', 10)));
   const skip = (page - 1) * limit;
 
-  // Sorting
-  const sort = query.sort || 'id';
+  // Sorting — validate sort field against allowed fields
+  const sortField = query.sort || 'id';
+  const sort = allowedFilterFields.length === 0 || allowedFilterFields.includes(sortField)
+    ? sortField
+    : 'id';
   const order = query.order === 'asc' ? 'asc' : 'desc';
   const orderBy = { [sort]: order };
 
-  // Filtering
+  // Filtering — only allow known fields
   const where: Record<string, any> = {};
   if (query.filter && typeof query.filter === 'object') {
     for (const [key, value] of Object.entries(query.filter)) {
+      if (allowedFilterFields.length > 0 && !allowedFilterFields.includes(key)) {
+        continue; // Skip unknown filter fields
+      }
       if (typeof value === 'string') {
-        // Check if it looks like a number
         const num = Number(value);
         if (!isNaN(num)) {
           where[key] = num;
@@ -49,6 +59,19 @@ export function buildQueryOptions(query: Record<string, any>): QueryOptions {
         }
       }
     }
+  }
+
+  // Full-text search across searchable fields
+  if (query.search && typeof query.search === 'string' && searchableFields.length > 0) {
+    const searchTerm = query.search;
+    const searchConditions = searchableFields.map((field) => ({
+<% if (datasource.provider === 'postgresql' || datasource.provider === 'mysql') { %>
+      [field]: { contains: searchTerm, mode: 'insensitive' as const },
+<% } else { %>
+      [field]: { contains: searchTerm },
+<% } %>
+    }));
+    where.OR = searchConditions;
   }
 
   // Includes

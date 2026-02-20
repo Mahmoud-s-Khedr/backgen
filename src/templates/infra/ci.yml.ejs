@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
+<% if (provider === 'postgresql') { %>
     services:
       postgres:
         image: postgres:16-alpine
@@ -24,9 +24,42 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
+<% } else if (provider === 'mysql') { %>
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_DATABASE: test_db
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+<% } else if (provider === 'mongodb') { %>
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+<% } %>
     env:
+<% if (provider === 'sqlite') { -%>
+      DATABASE_URL: file:./test.db
+<% } else if (provider === 'mysql') { -%>
+      DATABASE_URL: mysql://root:root@localhost:3306/test_db
+<% } else if (provider === 'mongodb') { -%>
+      DATABASE_URL: mongodb://localhost:27017/test_db
+<% } else { -%>
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db?schema=public
+<% } -%>
       JWT_SECRET: test-secret-key-at-least-32-chars-long
       NODE_ENV: test
 
@@ -38,6 +71,10 @@ jobs:
           cache: npm
 
       - run: npm ci
+<% if (provider !== 'mongodb') { -%>
       - run: npx prisma migrate deploy
+<% } else { -%>
+      - run: npx prisma db push
+<% } -%>
       - run: npm run build
       - run: npm test

@@ -1,0 +1,293 @@
+// Example 10: Hospital Management System
+// Complexity: Twelve models — real-world healthcare system
+// Demonstrates: all directives, enums, complex relations, @bcm.protected, @bcm.auth(roles), @bcm.softDelete, @bcm.searchable, @bcm.hidden, @bcm.writeOnly, @bcm.readonly, @bcm.nested
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.protected
+model Patient {
+  id              String          @id @default(uuid())
+  /// @bcm.searchable
+  firstName       String
+  /// @bcm.searchable
+  lastName        String
+  dateOfBirth     DateTime
+  gender          Gender
+  /// @bcm.hidden
+  ssn             String?         @unique
+  email           String?         @unique
+  phone           String?
+  bloodType       BloodType?
+  ward            Ward?           @relation(fields: [wardId], references: [id])
+  wardId          String?
+  insurance       Insurance?
+  appointments    Appointment[]
+  medicalRecords  MedicalRecord[]
+  prescriptions   Prescription[]
+  labResults      LabResult[]
+  billings        Billing[]
+  /// @bcm.readonly
+  createdAt       DateTime        @default(now())
+  /// @bcm.readonly
+  updatedAt       DateTime        @updatedAt
+}
+
+/// @bcm.protected
+model Doctor {
+  id             String        @id @default(uuid())
+  /// @bcm.searchable
+  firstName      String
+  /// @bcm.searchable
+  lastName       String
+  email          String        @unique
+  phone          String
+  specialization String
+  licenseNumber  String        @unique
+  department     Department    @relation(fields: [departmentId], references: [id])
+  departmentId   String
+  appointments   Appointment[]
+  medicalRecords MedicalRecord[]
+  prescriptions  Prescription[]
+  /// @bcm.readonly
+  createdAt      DateTime      @default(now())
+}
+
+model Nurse {
+  id           String     @id @default(uuid())
+  /// @bcm.searchable
+  firstName    String
+  /// @bcm.searchable
+  lastName     String
+  email        String     @unique
+  phone        String
+  shift        Shift      @default(DAY)
+  ward         Ward       @relation(fields: [wardId], references: [id])
+  wardId       String
+  department   Department @relation(fields: [departmentId], references: [id])
+  departmentId String
+  /// @bcm.readonly
+  createdAt    DateTime   @default(now())
+}
+
+model Department {
+  id        String   @id @default(uuid())
+  /// @bcm.searchable
+  name      String   @unique
+  floor     Int
+  building  String   @default("Main")
+  doctors   Doctor[]
+  nurses    Nurse[]
+  wards     Ward[]
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+}
+
+model Ward {
+  id           String     @id @default(uuid())
+  /// @bcm.searchable
+  name         String
+  capacity     Int
+  type         WardType   @default(GENERAL)
+  department   Department @relation(fields: [departmentId], references: [id])
+  departmentId String
+  patients     Patient[]
+  nurses       Nurse[]
+  /// @bcm.readonly
+  createdAt    DateTime   @default(now())
+}
+
+/// @bcm.protected
+model Appointment {
+  id         String            @id @default(uuid())
+  /// @bcm.nested
+  patient    Patient           @relation(fields: [patientId], references: [id])
+  patientId  String
+  /// @bcm.nested
+  doctor     Doctor            @relation(fields: [doctorId], references: [id])
+  doctorId   String
+  date       DateTime
+  duration   Int               @default(30)
+  status     AppointmentStatus @default(SCHEDULED)
+  reason     String?
+  notes      String?
+  /// @bcm.readonly
+  createdAt  DateTime          @default(now())
+  /// @bcm.readonly
+  updatedAt  DateTime          @updatedAt
+}
+
+/// @bcm.auth(roles: [DOCTOR, ADMIN])
+model MedicalRecord {
+  id          String   @id @default(uuid())
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  patientId   String
+  doctor      Doctor   @relation(fields: [doctorId], references: [id])
+  doctorId    String
+  diagnosis   String
+  /// @bcm.searchable
+  description String
+  treatment   String?
+  /// @bcm.readonly
+  createdAt   DateTime @default(now())
+}
+
+/// @bcm.protected
+/// @bcm.softDelete
+model Prescription {
+  id          String             @id @default(uuid())
+  patient     Patient            @relation(fields: [patientId], references: [id])
+  patientId   String
+  doctor      Doctor             @relation(fields: [doctorId], references: [id])
+  doctorId    String
+  medication  Medication         @relation(fields: [medicationId], references: [id])
+  medicationId String
+  dosage      String
+  frequency   String
+  startDate   DateTime
+  endDate     DateTime?
+  status      PrescriptionStatus @default(ACTIVE)
+  notes       String?
+  /// @bcm.readonly
+  createdAt   DateTime           @default(now())
+  /// @bcm.readonly
+  updatedAt   DateTime           @updatedAt
+  deletedAt   DateTime?
+}
+
+model Medication {
+  id            String         @id @default(uuid())
+  /// @bcm.searchable
+  name          String
+  genericName   String?
+  manufacturer  String
+  dosageForm    String
+  strength      String
+  prescriptions Prescription[]
+  /// @bcm.readonly
+  createdAt     DateTime       @default(now())
+}
+
+/// @bcm.protected
+model LabResult {
+  id          String        @id @default(uuid())
+  patient     Patient       @relation(fields: [patientId], references: [id])
+  patientId   String
+  testName    String
+  testCode    String
+  result      String
+  unit        String?
+  referenceRange String?
+  status      LabStatus     @default(PENDING)
+  orderedAt   DateTime      @default(now())
+  completedAt DateTime?
+  /// @bcm.readonly
+  createdAt   DateTime      @default(now())
+}
+
+/// @bcm.protected
+model Insurance {
+  id             String   @id @default(uuid())
+  patient        Patient  @relation(fields: [patientId], references: [id])
+  patientId      String   @unique
+  provider       String
+  /// @bcm.hidden
+  policyNumber   String
+  /// @bcm.hidden
+  groupNumber    String?
+  coverageStart  DateTime
+  coverageEnd    DateTime?
+  copayAmount    Float?
+  /// @bcm.readonly
+  createdAt      DateTime @default(now())
+  /// @bcm.readonly
+  updatedAt      DateTime @updatedAt
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model Billing {
+  id          String        @id @default(uuid())
+  patient     Patient       @relation(fields: [patientId], references: [id])
+  patientId   String
+  description String
+  amount      Float
+  status      BillingStatus @default(PENDING)
+  dueDate     DateTime?
+  paidAt      DateTime?
+  /// @bcm.readonly
+  createdAt   DateTime      @default(now())
+  /// @bcm.readonly
+  updatedAt   DateTime      @updatedAt
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum BloodType {
+  A_POSITIVE
+  A_NEGATIVE
+  B_POSITIVE
+  B_NEGATIVE
+  AB_POSITIVE
+  AB_NEGATIVE
+  O_POSITIVE
+  O_NEGATIVE
+}
+
+enum Shift {
+  DAY
+  EVENING
+  NIGHT
+}
+
+enum WardType {
+  GENERAL
+  ICU
+  MATERNITY
+  PEDIATRIC
+  SURGICAL
+  PSYCHIATRIC
+  EMERGENCY
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PrescriptionStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  ON_HOLD
+}
+
+enum LabStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum BillingStatus {
+  PENDING
+  INVOICED
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}

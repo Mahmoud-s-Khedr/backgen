@@ -11,30 +11,46 @@ export interface DirectiveResult {
 export interface ModelDirectivesResult {
     modelName: string;
     modelDirectives: ModelDirective[];
+    authRoles?: string[];
     fields: Map<string, FieldDirective[]>;
     warnings: string[];
 }
 
-const DIRECTIVE_REGEX = /^\/\/\/\s*@bcm\.(\w+)\s*$/;
+const DIRECTIVE_REGEX = /^\/\/\/\s*@bcm\.(\w+)(?:\(([^)]*)\))?\s*$/;
 
 const VALID_FIELD_DIRECTIVES: Set<string> = new Set([
     'hidden',
     'readonly',
     'writeOnly',
-    // v1.1 field directives (recognized but not actively processed)
     'searchable',
+    'nested',
+    'identifier',
+    'password',
 ]);
 
 const VALID_MODEL_DIRECTIVES: Set<string> = new Set([
     'protected',
-    // v1.1 model directives (recognized but not actively processed)
     'softDelete',
+    'auth',
+    'authModel',
 ]);
+
+/**
+ * Parse role names from @bcm.auth(roles: [ADMIN, MODERATOR]) arguments.
+ */
+function parseAuthRoles(rawArgs: string): string[] {
+    const match = rawArgs.match(/roles:\s*\[([^\]]*)\]/);
+    if (!match) return [];
+    return match[1].split(',').map(r => r.trim()).filter(Boolean);
+}
 
 const CONFLICTING_PAIRS: [FieldDirective, FieldDirective][] = [
     ['hidden', 'writeOnly'],   // contradictory: hidden excludes from inputs, writeOnly accepts in inputs
     ['hidden', 'readonly'],    // redundant: hidden already excludes from inputs and outputs; readonly only excludes inputs
     ['readonly', 'writeOnly'], // Can't be both readonly and writeOnly
+    ['password', 'writeOnly'], // redundant: @bcm.password already implies writeOnly
+    ['password', 'readonly'],  // Can't be both password and readonly
+    ['password', 'hidden'],    // Can't be both password and hidden
 ];
 
 /**
@@ -58,6 +74,7 @@ export function parseDirectives(
     let currentModel: string | null = null;
     let pendingFieldDirectives: FieldDirective[] = [];
     let pendingModelDirectives: ModelDirective[] = [];
+    let pendingAuthRoles: string[] = [];
     let pendingWarnings: string[] = [];
 
     for (let i = 0; i < lines.length; i++) {
@@ -72,16 +89,21 @@ export function parseDirectives(
                 results.set(currentModel, {
                     modelName: currentModel,
                     modelDirectives: [...pendingModelDirectives],
+                    authRoles: pendingAuthRoles.length > 0 ? [...pendingAuthRoles] : undefined,
                     fields: new Map(),
                     warnings: [...pendingWarnings],
                 });
             } else {
                 const result = results.get(currentModel)!;
                 result.modelDirectives.push(...pendingModelDirectives);
+                if (pendingAuthRoles.length > 0) {
+                    result.authRoles = [...pendingAuthRoles];
+                }
                 result.warnings.push(...pendingWarnings);
             }
             pendingFieldDirectives = [];
             pendingModelDirectives = [];
+            pendingAuthRoles = [];
             pendingWarnings = [];
             continue;
         }
@@ -98,6 +120,7 @@ export function parseDirectives(
             currentModel = null;
             pendingFieldDirectives = [];
             pendingModelDirectives = [];
+            pendingAuthRoles = [];
             pendingWarnings = [];
             continue;
         }
@@ -106,6 +129,7 @@ export function parseDirectives(
         const directiveMatch = line.match(DIRECTIVE_REGEX);
         if (directiveMatch) {
             const directiveName = directiveMatch[1];
+            const directiveArgs = directiveMatch[2]; // e.g., "roles: [ADMIN, MODERATOR]"
 
             if (VALID_MODEL_DIRECTIVES.has(directiveName)) {
                 if (currentModel) {
@@ -115,19 +139,18 @@ export function parseDirectives(
                     );
                 } else {
                     pendingModelDirectives.push(directiveName as ModelDirective);
+                    if (directiveName === 'auth' && directiveArgs) {
+                        pendingAuthRoles = parseAuthRoles(directiveArgs);
+                    }
                 }
                 continue;
             }
 
             if (VALID_FIELD_DIRECTIVES.has(directiveName)) {
                 if (!currentModel) {
-                    // Field directive outside a model block — ignore
-                    continue;
-                }
-                // v1.1 field directives: warn but don't process
-                if (directiveName === 'searchable') {
+                    // Field directive outside a model block — warn
                     pendingWarnings.push(
-                        `Line ${lineNum}: @bcm.${directiveName} is a v1.1 directive and will be ignored in this version`
+                        `Line ${lineNum}: @bcm.${directiveName} is a field directive but appears outside a model block — it will be ignored`
                     );
                     continue;
                 }

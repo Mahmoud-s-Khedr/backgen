@@ -20,6 +20,54 @@ function generateOpenApiSpec(schema: ParsedSchema): any {
     const paths: Record<string, any> = {};
     const schemas: Record<string, any> = {};
 
+    // Auth login endpoint (when @bcm.authModel is present)
+    const authModel = schema.models.find(m => m.isAuthModel);
+    if (authModel && authModel.identifierField && authModel.passwordField) {
+        paths['/api/auth/login'] = {
+            post: {
+                tags: ['Auth'],
+                summary: 'Login and get JWT token',
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: [authModel.identifierField, authModel.passwordField],
+                                properties: {
+                                    [authModel.identifierField]: { type: 'string' },
+                                    [authModel.passwordField]: { type: 'string' },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': {
+                        description: 'Login successful',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                token: { type: 'string', description: 'JWT bearer token' },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '401': { description: 'Invalid credentials' },
+                    '422': { description: 'Validation error' },
+                },
+            },
+        };
+    }
+
     // Health check endpoint
     paths['/health'] = {
         get: {
@@ -50,6 +98,8 @@ function generateOpenApiSpec(schema: ParsedSchema): any {
         const modelPlural = helpers.pluralize(modelLower);
         const basePath = `/api/${modelPlural}`;
         const tag = model.name;
+        const isProtected = model.directives.includes('protected') || model.directives.includes('auth');
+        const authRoles = model.authRoles ?? [];
 
         // Build schema components
         const responseFields = model.fields.filter(
@@ -63,14 +113,55 @@ function generateOpenApiSpec(schema: ParsedSchema): any {
                 !f.isRelation &&
                 !f.isId &&
                 !f.directives.includes('readonly') &&
-                (!f.hasDefault || f.directives.includes('writeOnly'))
+                (!f.isServerDefault || f.directives.includes('writeOnly'))
         );
+
+        // Nested relations for this model
+        const nestedRelations = model.fields.filter(
+            (f) => f.directives.includes('nested') && !f.isList && f.relationModel
+        );
+
+        // Generate nested input schemas
+        for (const nr of nestedRelations) {
+            const targetModel = schema.models.find(m => m.name === nr.relationModel);
+            if (targetModel) {
+                const targetCreateFields = targetModel.fields.filter(
+                    (f) => !f.isRelation && !f.isId && !f.directives.includes('readonly') && (!f.hasDefault || f.directives.includes('writeOnly'))
+                );
+                const createSchema = buildObjectSchema(targetCreateFields, schema, true);
+                schemas[`${model.name}_${nr.name[0].toUpperCase() + nr.name.slice(1)}Input`] = {
+                    type: 'object',
+                    properties: {
+                        create: { ...createSchema, description: 'Create a new related record' },
+                        connect: {
+                            type: 'object',
+                            properties: { id: { type: 'string' } },
+                            required: ['id'],
+                            description: 'Connect to an existing record by ID',
+                        },
+                    },
+                    description: `Nested input: provide either 'create' or 'connect'`,
+                };
+            }
+        }
 
         // Response schema
         schemas[`${model.name}Response`] = buildObjectSchema(responseFields, schema, false);
 
-        // Create schema
-        schemas[`${model.name}Create`] = buildObjectSchema(createFields, schema, true);
+        // Create schema (exclude FK fields that have nested counterparts)
+        const nestedFkFields = new Set(
+            nestedRelations
+                .filter(nr => nr.relationField)
+                .flatMap(nr => nr.relationField!.split(', ').map(f => f.trim()))
+        );
+        const createFieldsFiltered = createFields.filter(f => !nestedFkFields.has(f.name));
+        const createSchemaObj = buildObjectSchema(createFieldsFiltered, schema, true);
+        // Add nested relation properties
+        for (const nr of nestedRelations) {
+            const inputRef = `${model.name}_${nr.name[0].toUpperCase() + nr.name.slice(1)}Input`;
+            createSchemaObj.properties[nr.name] = { $ref: `#/components/schemas/${inputRef}` };
+        }
+        schemas[`${model.name}Create`] = createSchemaObj;
 
         // Update schema (same as create)
         schemas[`${model.name}Update`] = buildObjectSchema(createFields, schema, true);
@@ -88,6 +179,7 @@ function generateOpenApiSpec(schema: ParsedSchema): any {
                     { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
                     { name: 'sort', in: 'query', schema: { type: 'string' } },
                     { name: 'order', in: 'query', schema: { type: 'string', enum: ['asc', 'desc'] } },
+                    { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search term for @bcm.searchable fields' },
                     { name: 'include', in: 'query', schema: { type: 'string' }, description: 'Comma-separated relation names to include' },
                 ],
                 responses: {
@@ -139,7 +231,10 @@ function generateOpenApiSpec(schema: ParsedSchema): any {
                         },
                     },
                     '422': { description: 'Validation error' },
+                    ...(isProtected ? { '401': { description: 'Unauthorized' } } : {}),
+                    ...(authRoles.length > 0 ? { '403': { description: `Forbidden — requires role: ${authRoles.join(', ')}` } } : {}),
                 },
+                ...(isProtected ? { security: [{ bearerAuth: [] }] } : {}),
             },
         };
 
@@ -189,7 +284,10 @@ function generateOpenApiSpec(schema: ParsedSchema): any {
                     },
                     '404': { description: 'Not found' },
                     '422': { description: 'Validation error' },
+                    ...(isProtected ? { '401': { description: 'Unauthorized' } } : {}),
+                    ...(authRoles.length > 0 ? { '403': { description: `Forbidden — requires role: ${authRoles.join(', ')}` } } : {}),
                 },
+                ...(isProtected ? { security: [{ bearerAuth: [] }] } : {}),
             },
             patch: {
                 tags: [tag],
@@ -216,7 +314,10 @@ function generateOpenApiSpec(schema: ParsedSchema): any {
                     },
                     '404': { description: 'Not found' },
                     '422': { description: 'Validation error' },
+                    ...(isProtected ? { '401': { description: 'Unauthorized' } } : {}),
+                    ...(authRoles.length > 0 ? { '403': { description: `Forbidden — requires role: ${authRoles.join(', ')}` } } : {}),
                 },
+                ...(isProtected ? { security: [{ bearerAuth: [] }] } : {}),
             },
             delete: {
                 tags: [tag],
@@ -227,7 +328,10 @@ function generateOpenApiSpec(schema: ParsedSchema): any {
                 responses: {
                     '204': { description: 'Deleted successfully' },
                     '404': { description: 'Not found' },
+                    ...(isProtected ? { '401': { description: 'Unauthorized' } } : {}),
+                    ...(authRoles.length > 0 ? { '403': { description: `Forbidden — requires role: ${authRoles.join(', ')}` } } : {}),
                 },
+                ...(isProtected ? { security: [{ bearerAuth: [] }] } : {}),
             },
         };
     }
@@ -240,6 +344,10 @@ function generateOpenApiSpec(schema: ParsedSchema): any {
         };
     }
 
+    const hasAuth = schema.models.some(
+        (m) => m.directives.includes('protected') || m.directives.includes('auth')
+    );
+
     return {
         openapi: '3.0.3',
         info: {
@@ -251,7 +359,18 @@ function generateOpenApiSpec(schema: ParsedSchema): any {
             { url: 'http://localhost:3000', description: 'Development server' },
         ],
         paths,
-        components: { schemas },
+        components: {
+            schemas,
+            ...(hasAuth ? {
+                securitySchemes: {
+                    bearerAuth: {
+                        type: 'http',
+                        scheme: 'bearer',
+                        bearerFormat: 'JWT',
+                    },
+                },
+            } : {}),
+        },
     };
 }
 
@@ -267,6 +386,8 @@ function buildObjectSchema(
         const prop = prismaTypeToOpenApi(field.type, schema);
         if (field.isList) {
             properties[field.name] = { type: 'array', items: prop };
+        } else if (field.isOptional) {
+            properties[field.name] = { ...prop, nullable: true };
         } else {
             properties[field.name] = prop;
         }

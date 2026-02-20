@@ -1,0 +1,60 @@
+// Example 5: School Management (MySQL)
+// Complexity: Four models with many-to-many via junction table
+// Demonstrates: many-to-many relations, junction table, @bcm.searchable, @bcm.readonly, MySQL provider
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Student {
+  id          String       @id @default(uuid())
+  /// @bcm.searchable
+  name        String
+  email       String       @unique
+  grade       Int
+  enrollments Enrollment[]
+  /// @bcm.readonly
+  createdAt   DateTime     @default(now())
+}
+
+model Teacher {
+  id        String   @id @default(uuid())
+  /// @bcm.searchable
+  name      String
+  email     String   @unique
+  department String
+  courses   Course[]
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+}
+
+model Course {
+  id          String       @id @default(uuid())
+  /// @bcm.searchable
+  name        String
+  code        String       @unique
+  description String?
+  credits     Int
+  teacher     Teacher      @relation(fields: [teacherId], references: [id])
+  teacherId   String
+  enrollments Enrollment[]
+}
+
+model Enrollment {
+  id        String   @id @default(uuid())
+  student   Student  @relation(fields: [studentId], references: [id])
+  studentId String
+  course    Course   @relation(fields: [courseId], references: [id])
+  courseId   String
+  semester  String
+  grade     String?
+  /// @bcm.readonly
+  enrolledAt DateTime @default(now())
+
+  @@unique([studentId, courseId, semester])
+}

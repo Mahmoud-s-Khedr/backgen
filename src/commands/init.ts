@@ -36,6 +36,7 @@ export async function initCommand(projectName: string): Promise<void> {
             name: projectName,
             version: '0.1.0',
             private: true,
+            type: 'module',
             scripts: {
                 dev: 'tsx watch src/server.ts',
                 build: 'tsc',
@@ -44,6 +45,7 @@ export async function initCommand(projectName: string): Promise<void> {
                 migrate: 'prisma migrate dev',
                 seed: 'tsx prisma/seed.ts',
                 studio: 'prisma studio',
+                generate: 'prisma generate',
             },
         };
         await fs.writeJson(join(projectDir, 'package.json'), packageJson, {
@@ -90,10 +92,14 @@ generator client {
 }
 
 // Define your models below. Use /// @bcm.* directives for API behavior.
-// Available directives:
-//   /// @bcm.hidden    - Exclude field from all API responses
-//   /// @bcm.readonly  - Field cannot be set via API
-//   /// @bcm.writeOnly - Accept on write, never return in response
+// Field directives (place before a field):
+//   /// @bcm.hidden     - Exclude field from all API inputs and responses
+//   /// @bcm.readonly   - Field cannot be set via API (shown in responses)
+//   /// @bcm.writeOnly  - Accept on write, never return in response
+//   /// @bcm.searchable - Include in ?search= full-text search
+// Model directives (place before model declaration):
+//   /// @bcm.protected  - Require JWT auth for mutation endpoints
+//   /// @bcm.softDelete - Use deletedAt timestamp instead of hard delete
 
 model User {
   id        String   @id @default(uuid())

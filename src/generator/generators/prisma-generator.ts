@@ -15,9 +15,8 @@ const BCM_DIRECTIVE_REGEX = /^\s*\/\/\/\s*@bcm\.\w+.*\n?/gm;
  */
 function topoSortModels(
     models: ModelDefinition[],
-    enums: EnumDefinition[]
+    _enums: EnumDefinition[]
 ): ModelDefinition[] {
-    const enumNames = new Set(enums.map((e) => e.name));
     const modelNames = new Set(models.map((m) => m.name));
 
     // adj[N] = [M, ...] means M depends on N (N must come first)
@@ -27,7 +26,7 @@ function topoSortModels(
     for (const m of models) {
         for (const f of m.fields) {
             // Only consider non-list, non-enum relation object fields
-            if (!f.isRelation || f.isList || enumNames.has(f.type) || f.type === m.name) continue;
+            if (!f.isRelation || f.isList || f.isEnum || f.type === m.name) continue;
             // The relation must have a companion FK scalar field (e.g., authorId for author)
             const fkName = f.name + 'Id';
             if (!m.fields.some((sf) => sf.name === fkName && !sf.isRelation)) continue;
@@ -82,7 +81,9 @@ export function generatePrismaFiles(schema: ParsedSchema, schemaContent?: string
 
     // If we have the raw schema content, include a cleaned version
     if (schemaContent) {
-        const cleanedSchema = schemaContent.replace(BCM_DIRECTIVE_REGEX, '');
+        const cleanedSchema = schemaContent
+            .replace(BCM_DIRECTIVE_REGEX, '')
+            .replace(/\n{3,}/g, '\n\n'); // Collapse blank lines left by removed directives
         files.unshift({
             path: 'prisma/schema.prisma',
             content: cleanedSchema,

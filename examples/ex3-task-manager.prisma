@@ -1,0 +1,64 @@
+// Example 3: Task Manager with Enums
+// Complexity: Three models, enums for Priority and Status
+// Demonstrates: enums, @bcm.searchable, @bcm.readonly
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id       String    @id @default(uuid())
+  email    String    @unique
+  name     String
+  projects Project[]
+  tasks    Task[]
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  /// @bcm.searchable
+  name        String
+  description String?
+  owner       User     @relation(fields: [ownerId], references: [id])
+  ownerId     String
+  tasks       Task[]
+  /// @bcm.readonly
+  createdAt   DateTime @default(now())
+}
+
+model Task {
+  id        String   @id @default(uuid())
+  /// @bcm.searchable
+  title     String
+  body      String?
+  status    Status   @default(TODO)
+  priority  Priority @default(MEDIUM)
+  project   Project  @relation(fields: [projectId], references: [id])
+  projectId String
+  assignee  User?    @relation(fields: [assigneeId], references: [id])
+  assigneeId String?
+  dueDate   DateTime?
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+  /// @bcm.readonly
+  updatedAt DateTime @updatedAt
+}
+
+enum Status {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}

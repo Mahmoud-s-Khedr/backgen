@@ -53,7 +53,7 @@ Thin database layer using Prisma:
 - `delete(id)` — maps `P2025` → 404
 
 #### Routes (`{model}.routes.ts`)
-Express `Router` wiring all six methods to the controller. When `@bcm.protected` is set on the model, the `authenticate` JWT middleware is automatically applied to all mutation routes (POST, PUT, PATCH, DELETE); GET routes remain public.
+Express `Router` wiring all six methods to the controller. When `@bcm.protected` or `@bcm.auth(roles: [...])` is set on the model, the `authenticate` JWT middleware is automatically applied to all mutation routes (POST, PUT, PATCH, DELETE); GET routes remain public. When `@bcm.auth` is used with roles, an `authorize()` middleware is also applied to enforce role-based access control.
 
 #### DTO (`{model}.dto.ts`)
 Four Zod schemas derived directly from the Prisma schema:
@@ -72,6 +72,10 @@ Supertest scaffold covering:
 - `GET /` returns 200 with `data` array and pagination `meta`
 - `GET /non-existent-id` returns 404 RFC 7807 response
 - `POST /` with minimum required payload returns 201
+- `POST /` with empty body returns 422 validation error
+- `PUT /:id` full update scaffold
+- `PATCH /:id` partial update scaffold
+- `DELETE /:id` returns 204 scaffold
 
 ---
 
@@ -89,22 +93,22 @@ Supertest scaffold covering:
 #### Middleware (`src/middlewares/`)
 | File | Purpose |
 |------|---------|
-| `error.middleware.ts` | RFC 7807 Problem Detail error handler; maps ZodError → 422, Prisma errors → 409/404, unknown → 500 |
-| `auth.middleware.ts` | JWT verification via `jsonwebtoken`; attaches decoded payload to `req.user`; handles expired vs invalid tokens separately |
+| `error.middleware.ts` | RFC 7807 Problem Detail error handler; maps ZodError → 422, 9 Prisma error codes to appropriate HTTP statuses, unknown → 500 |
+| `auth.middleware.ts` | `authenticate` — JWT verification via `jsonwebtoken`; attaches decoded payload to `req.user`. `authorize(...roles)` — role-based access control middleware for `@bcm.auth` models. |
 | `rate-limit.middleware.ts` | `express-rate-limit` — 100 req/15 min window (configurable via env) |
-| `validation.middleware.ts` | Zod middleware factory for use in custom routes |
+| `validation.middleware.ts` | Zod middleware factory; used at the route level for POST/PUT/PATCH request validation |
 
 #### Utilities (`src/utils/`)
 | File | Purpose |
 |------|---------|
 | `query-builder.ts` | Converts URL query params → Prisma `findMany` arguments (see §1.4) |
-| `response.ts` | `sendSuccess(res, data, meta?)`, `sendCreated(res, data)`, `sendNoContent(res)` helpers |
+| `response.ts` | `sendSuccess<T>(res, data, meta?)`, `sendCreated<T>(res, data)`, `sendNoContent(res)` generic helpers |
 
 #### Application (`src/app.ts`, `src/server.ts`)
 Full Express app middleware stack in order:
 1. `helmet()` — security headers
 2. `cors(corsOptions)` — origin policy
-3. `express.json({ limit: '10mb' })` + `urlencoded`
+3. `express.json({ limit: process.env.JSON_LIMIT || '1mb' })` + `urlencoded`
 4. `compression()` — gzip responses
 5. Inline `X-Request-ID` middleware — forwards or generates a UUID per request for tracing
 6. `pinoHttp({ logger })` — structured request logging
@@ -114,12 +118,12 @@ Full Express app middleware stack in order:
 10. Swagger UI at `/api/docs`
 11. `errorMiddleware` — must be last
 
-`server.ts` wraps the app in `http.createServer()` with graceful shutdown (10-second drain timeout) on `SIGTERM`/`SIGINT`.
+`server.ts` wraps the app in `http.createServer()` with graceful shutdown (configurable timeout, default 30s via `SHUTDOWN_TIMEOUT` env var) on `SIGTERM`/`SIGINT`.
 
 #### Infrastructure (`Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml`)
 - **Dockerfile** — multi-stage build (builder → production); Alpine base; non-root `appuser`; health check
-- **docker-compose.yml** — app + PostgreSQL services; credentials via env vars (not hardcoded)
-- **CI pipeline** — GitHub Actions: lint → test → build; PostgreSQL service container included
+- **docker-compose.yml** — app + database service (provider-aware: PostgreSQL, MySQL, MongoDB, or no service for SQLite); credentials via env vars (not hardcoded)
+- **CI pipeline** — GitHub Actions: lint → test → build; provider-aware database service container included
 
 #### OpenAPI Spec (`openapi.json`)
 Full OpenAPI 3.0 document generated at generation time:
@@ -147,9 +151,10 @@ GET /api/posts?filter[title]=hello&sort=viewCount&order=desc&page=1&limit=5
 |-----------|------|-----------|
 | `page` | integer | Default 1, minimum 1 |
 | `limit` | integer | Default 20, maximum 100 |
-| `sort` | field name | Default `createdAt` |
+| `sort` | field name | Default `id`; validated against allowed filter fields |
 | `order` | `asc` / `desc` | Default `desc` |
-| `filter[field]` | string | String → `contains` (case-insensitive on PostgreSQL/MySQL); number → exact match; `true`/`false` → boolean |
+| `filter[field]` | string | String → `contains` (case-insensitive on PostgreSQL/MySQL); number → exact match; `true`/`false` → boolean. Only allowed fields accepted (hidden/writeOnly fields rejected) |
+| `search` | string | Full-text search across `@bcm.searchable` fields using case-insensitive `contains` with OR logic |
 | `include` | comma-separated | Eager-loads named Prisma relations |
 
 Response envelope:
@@ -184,7 +189,11 @@ model Post {
 | `@bcm.hidden` | field | Excluded from all API responses AND all input schemas |
 | `@bcm.readonly` | field | Excluded from Create/Update/Patch bodies; still included in responses |
 | `@bcm.writeOnly` | field | Accepted in Create/Update inputs; **never** returned in responses |
+| `@bcm.searchable` | field | Included in `?search=term` full-text search across marked fields |
+| `@bcm.nested` | field | Enables nested create/connect for a relation field; FK field excluded from CreateSchema |
 | `@bcm.protected` | model | POST/PUT/PATCH/DELETE routes require `Authorization: Bearer <token>` |
+| `@bcm.auth(roles: [...])` | model | Like `@bcm.protected`, plus `authorize()` middleware enforces role membership |
+| `@bcm.softDelete` | model | DELETE sets `deletedAt` timestamp instead of hard delete; all queries filter out soft-deleted records |
 
 ---
 
@@ -195,7 +204,7 @@ model Post {
 bcm generate --schema prisma/schema.prisma --output ./api
 
 # Generate only specific categories (routes, config, middleware, utils, app, infra, prisma, swagger)
-bcm generate --schema schema.prisma --output ./api --only routes,config
+bcm generate --schema schema.prisma --output ./api --only routes
 
 # Preview what would be written without writing anything
 bcm generate --schema schema.prisma --output ./api --dry-run
@@ -203,11 +212,11 @@ bcm generate --schema schema.prisma --output ./api --dry-run
 # Force overwrite of existing files
 bcm generate --schema schema.prisma --output ./api --force
 
-# Interactive project setup wizard
-bcm init
+# Create a new project with starter files
+bcm init <project-name>
 
 # Mark generated project as ejected (removes re-generation guards)
-bcm eject
+bcm eject <path>
 ```
 
 ---
@@ -250,12 +259,12 @@ bcm eject
 ### 2.2 Authorization
 
 - **No ownership enforcement** — any authenticated user can `DELETE /api/posts/:id` even if they didn't create the post. There is no `WHERE authorId = req.user.id` guard anywhere.
-- **No role-based access control** — `Role` enum fields (e.g., `USER`, `ADMIN`) are stored and returned but never checked in any middleware or handler.
+- **Role-based access control** — ✅ Now supported via `@bcm.auth(roles: [ADMIN])`. The `authorize()` middleware checks `req.user.role` from the JWT payload against the allowed roles. Returns 403 Forbidden if unauthorized.
 - **No field-level visibility** — you cannot say "return `email` only to admins"; all non-hidden fields are always returned to any caller.
 
 ### 2.3 Relation Handling
 
-- **No nested writes** — you cannot create a Post and connect Tags in one request. Foreign keys must be provided as plain ID strings; the client is responsible for creating related records separately.
+- **Nested writes** — ✅ Now supported via `@bcm.nested` directive on relation fields. Enables `create` or `connect` operations in a single API call (e.g., `{ "author": { "connect": { "id": "..." } } }`). Limited to single relations (not list relations) and one level deep.
 - **No nested routes** — there are no `/api/posts/:postId/comments` endpoints. Relation filtering is done via `?filter[postId]=abc`, which requires the client to know the ID.
 - **No many-to-many management** — joining Post and Tag via an implicit join table requires separate operations; there is no dedicated endpoint for it.
 - **No relation-level includes with pagination** — `?include=comments` loads *all* comments for a post, not a paginated subset.
@@ -276,7 +285,8 @@ The `?filter[field]=value` system only supports exact and substring matching:
 
 ### 2.5 Data Lifecycle
 
-- **No soft delete** — `DELETE` is always a hard `prisma.delete()`. If FK constraints exist without `onDelete: Cascade`, deleting a parent record (e.g., a User with Posts) will throw a Prisma error.
+- **Soft delete via directive** — Models marked `@bcm.softDelete` use a `deletedAt` timestamp. DELETE sets the timestamp, and all queries filter out soft-deleted records. Models without the directive use hard `prisma.delete()`. If FK constraints exist without `onDelete: Cascade`, deleting a parent record will throw a Prisma error.
+- **No restore endpoint** — Soft-deleted records have no `POST /:id/restore` endpoint; restoration requires direct database access.
 - **No audit log** — no record of who created, modified, or deleted any record, or when.
 - **No optimistic concurrency** — no `version` field or `ETag` header support to detect concurrent modifications.
 
@@ -288,9 +298,9 @@ The `?filter[field]=value` system only supports exact and substring matching:
 
 ### 2.7 Testing and Seeding
 
-- **Minimal seed coverage** — `prisma/seed.ts` inserts 5 records per model using `@faker-js/faker` with dependency-aware ordering (parent tables first). It covers basic data population but not complex business scenarios or many-to-many join tables.
+- **Configurable seed** — `prisma/seed.ts` inserts records per model (default 5, configurable via `SEED_COUNT` env var) using `@faker-js/faker` with dependency-aware ordering (parent tables first). It covers basic data population but not complex business scenarios or many-to-many join tables.
 - **No test isolation** — the generated test files import and use the live Express app with no test database setup or teardown.
-- **No lifecycle tests** — only a GET list test and a GET 404 test are generated. There are no create/update/delete tests.
+- **Basic lifecycle tests** — test scaffold includes GET list, GET 404, POST create, PUT update, PATCH partial update, DELETE, and validation error (422) tests with a `validPayload()` helper. However, tests don't set up/teardown test data.
 
 ---
 
@@ -310,7 +320,7 @@ All routes are mounted at `/api/{model}` with no version prefix. There is no `/a
 
 ### 3.3 Single Database
 
-Only one Prisma datasource is supported. You cannot mix a primary PostgreSQL database with Redis for caching, a separate read replica, or a secondary data store.
+Only one Prisma datasource is supported per project, though the generator now supports multiple providers: **PostgreSQL**, **MySQL**, **SQLite**, and **MongoDB**. The `datasource.provider` in the schema drives provider-aware Docker Compose, CI pipelines, and `.env.example` generation. You cannot mix a primary database with Redis for caching, a separate read replica, or a secondary data store.
 
 ### 3.4 No Caching
 
@@ -372,21 +382,13 @@ When the parser detects a `@relation` without `onDelete: Cascade`, emit a commen
 
 ### 4.2 Medium-Term (New Directives)
 
-**`@bcm.softDelete`** *(model-level)*
-Generate `deletedAt DateTime?` handling:
-- `DELETE /:id` → `update({ deletedAt: new Date() })` instead of hard delete
-- All `findMany` and `findUnique` calls include `where: { deletedAt: null }`
-- New `POST /:id/restore` endpoint sets `deletedAt: null`
+> **Note:** `@bcm.softDelete` and `@bcm.searchable` are now implemented (see §1.5). The items below are remaining future enhancements.
 
-**`@bcm.searchable`** *(field-level)*
-Generate a `GET /api/{model}/search?q=term` endpoint using Prisma's full-text `search` mode on marked fields.
+**`@bcm.softDelete` restore endpoint**
+Add a `POST /:id/restore` endpoint for soft-deleted models that sets `deletedAt: null`.
 
-**`@bcm.auth(roles: [...])` ** *(model or field level)*
-Role-based access using `req.user.role` from the JWT payload:
-```prisma
-/// @bcm.auth(roles: [ADMIN])
-model AdminConfig { ... }
-```
+**`@bcm.auth(roles: [...])` — ✅ Implemented** *(model level)*
+Role-based access using `req.user.role` from the JWT payload. Generates `authorize()` middleware that returns 403 Forbidden if the user's role is not in the allowed list.
 
 **`@bcm.email`, `@bcm.url`, `@bcm.maxLength(N)`** *(field-level)*
 Field-level format and constraint directives that map directly to Zod validators, avoiding the need for heuristic field-name detection.

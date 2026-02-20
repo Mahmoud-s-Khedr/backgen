@@ -1,0 +1,138 @@
+// Example 7: Multi-Tenant SaaS Platform
+// Complexity: Six models with multi-tenant structure
+// Demonstrates: @bcm.protected, @bcm.auth(roles), @bcm.searchable, enums, multi-tenant patterns
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.auth(roles: [OWNER, ADMIN])
+model Organization {
+  id        String   @id @default(uuid())
+  /// @bcm.searchable
+  name      String
+  slug      String   @unique
+  plan      Plan     @default(FREE)
+  teams     Team[]
+  users     User[]
+  projects  Project[]
+  invites   Invite[]
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+}
+
+/// @bcm.protected
+model Team {
+  id             String       @id @default(uuid())
+  /// @bcm.searchable
+  name           String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  users          User[]
+  projects       Project[]
+  /// @bcm.readonly
+  createdAt      DateTime     @default(now())
+}
+
+/// @bcm.protected
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  /// @bcm.searchable
+  name           String
+  role           Role         @default(MEMBER)
+  /// @bcm.writeOnly
+  password       String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  team           Team?        @relation(fields: [teamId], references: [id])
+  teamId         String?
+  tasks          Task[]
+  /// @bcm.readonly
+  createdAt      DateTime     @default(now())
+}
+
+/// @bcm.protected
+model Project {
+  id             String       @id @default(uuid())
+  /// @bcm.searchable
+  name           String
+  description    String?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  team           Team?        @relation(fields: [teamId], references: [id])
+  teamId         String?
+  tasks          Task[]
+  /// @bcm.readonly
+  createdAt      DateTime     @default(now())
+  /// @bcm.readonly
+  updatedAt      DateTime     @updatedAt
+}
+
+/// @bcm.protected
+model Task {
+  id        String   @id @default(uuid())
+  /// @bcm.searchable
+  title     String
+  body      String?
+  status    TaskStatus @default(TODO)
+  priority  Int      @default(0)
+  assignee  User?    @relation(fields: [assigneeId], references: [id])
+  assigneeId String?
+  project   Project  @relation(fields: [projectId], references: [id])
+  projectId String
+  dueDate   DateTime?
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+  /// @bcm.readonly
+  updatedAt DateTime @updatedAt
+}
+
+/// @bcm.auth(roles: [OWNER, ADMIN])
+model Invite {
+  id             String       @id @default(uuid())
+  email          String
+  role           Role         @default(MEMBER)
+  status         InviteStatus @default(PENDING)
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  /// @bcm.readonly
+  createdAt      DateTime     @default(now())
+  expiresAt      DateTime
+
+  @@unique([email, organizationId])
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+  ARCHIVED
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}

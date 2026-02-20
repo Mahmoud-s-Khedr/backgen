@@ -2,18 +2,18 @@ import { PrismaClient } from '@prisma/client';
 import { faker } from '@faker-js/faker';
 
 const prisma = new PrismaClient();
+const SEED_COUNT = parseInt(process.env.SEED_COUNT || '5', 10);
 
 /**
  * Database Seed Script
  * Run with: npm run seed
+ * Configure count with: SEED_COUNT=10 npm run seed
  *
- * Seeds <%= models.length %> model(s) with 5 records each.
+ * Seeds <%= models.length %> model(s) with SEED_COUNT records each (default: 5).
  * Insertion order is dependency-aware: parent tables are seeded first.
  */
 <%
 // ── Template-time helpers ─────────────────────────────────────────────────────
-
-const enumNames = new Set(enums.map(e => e.name));
 
 /**
  * Return a faker expression string for the given field name + Prisma type.
@@ -87,7 +87,7 @@ const allFkMaps = {};
 for (const m of models) {
   const fkMap = {};
   for (const f of m.fields) {
-    if (!f.isRelation || f.isList || enumNames.has(f.type) || f.type === m.name) continue;
+    if (!f.isRelation || f.isList || f.isEnum || f.type === m.name) continue;
     const fkName = f.name + 'Id';
     if (m.fields.some(sf => sf.name === fkName && !sf.isRelation)) {
       fkMap[fkName] = f.type;
@@ -99,7 +99,7 @@ const fetchedParents = new Set(); // track which parent models have been cached
 %>
 
 async function main() {
-  console.log('Seeding database...');
+  console.log(`Seeding database (${SEED_COUNT} records per model)...`);
   // Clean up existing data (reverse dependency order for FK integrity)
 <% for (const model of [...models].reverse()) { -%>
   await prisma.<%= h.toCamelCase(model.name) %>.deleteMany();
@@ -118,14 +118,14 @@ async function main() {
     !f.hasDefault &&
     !f.isRelation &&
     !f.isList &&
+    !f.isEnum &&
     !f.directives.includes('readonly')
   );
 
-  // Enum fields for this model (parser marks enums as isRelation; distinguish by enumNames)
+  // Enum fields for this model
   const enumSeedFields = model.fields.filter(f =>
-    f.isRelation &&
+    f.isEnum &&
     !f.isList &&
-    enumNames.has(f.type) &&
     !f.hasDefault &&
     !f.directives.includes('readonly')
   );
@@ -144,7 +144,7 @@ async function main() {
   ).map((r) => r.id);
 <% } %>
 <% } -%>
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < SEED_COUNT; i++) {
     await prisma.<%= modelVar %>.create({
       data: {
 <% for (const field of seedFields) { -%>
@@ -166,7 +166,7 @@ async function main() {
       },
     });
   }
-  console.log('Seeded <%= model.name %>: 5 records');
+  console.log(`Seeded <%= model.name %>: ${SEED_COUNT} records`);
 <% } %>
 
   console.log('Seeding complete.');

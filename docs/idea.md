@@ -130,10 +130,11 @@ enum Role {
 | `@bcm.hidden` | Exclude field from all API inputs and responses (internal flags, audit columns) | Never included in any API input or response DTO | ✅ |
 | `@bcm.readonly` | Field cannot be set via API (only DB-generated) | Excluded from create/update/patch DTOs | ✅ |
 | `@bcm.writeOnly` | Accept on write, never return (password input) | Accepted on POST, PUT, and PATCH — never in response. On PATCH, field is optional (only updated if provided). | ✅ |
-| `@bcm.searchable` | Include in `?search=` query parameter | Adds field to full-text search filter | v1.1 |
-| `@bcm.softDelete` | Enable soft delete with `deletedAt` timestamp | DELETE sets `deletedAt`, queries filter by default | v1.1 |
+| `@bcm.searchable` | Include in `?search=` query parameter | Adds field to full-text search filter | ✅ |
+| `@bcm.softDelete` | Enable soft delete with `deletedAt` timestamp | DELETE sets `deletedAt`, queries filter by default | ✅ |
 | `@bcm.protected` | Require authentication for this model's endpoints | Wraps mutation routes (POST/PUT/PATCH/DELETE) in auth middleware | ✅ |
-| `@bcm.auth(roles)` | Require specific roles for access | Wraps routes in role-checking middleware | v1.1 |
+| `@bcm.auth(roles)` | Require specific roles for access | Wraps routes in role-checking middleware | ✅ |
+| `@bcm.nested` | Enable nested create/connect for relation fields | Generates nested Zod input schemas | ✅ |
 
 ### 3. Generated REST API Endpoints
 
@@ -272,9 +273,9 @@ npm run dev
 | Generated Backend | Express.js + TypeScript | Industry standard, widely adopted |
 | ORM | Prisma | Best-in-class TypeScript ORM |
 | Validation | Zod | Type-safe schema validation |
-| Documentation | swagger-jsdoc + swagger-ui-express | Industry standard API docs |
+| Documentation | swagger-ui-express + programmatic OpenAPI spec | Industry standard API docs |
 | Logging | Pino | Structured, high-performance logging |
-| Testing | Supertest + Jest | Standard testing stack |
+| Testing | Supertest + Jest (generated) / Vitest (CLI) | Standard testing stack |
 
 ### Architecture
 
@@ -315,7 +316,7 @@ npm run dev
 | Parse `/// @bcm.*` comment directives | P0 | Simple regex |
 | Express routes, controllers, services | P0 | EJS templates |
 | Zod validation (schema-aware) | P0 | Required = required |
-| Swagger/OpenAPI generation | P0 | swagger-jsdoc |
+| Swagger/OpenAPI generation | P0 | swagger-ui-express + programmatic spec |
 | Pagination, sorting, filtering | P0 | Query builder utility |
 | `@bcm.hidden` directive | P0 | Exclude from all inputs and responses |
 | `@bcm.readonly` directive | P0 | Exclude from mutations |
@@ -336,14 +337,14 @@ npm run dev
 
 | Feature | Notes |
 |---------|-------|
-| `@bcm.searchable` | Full-text search (database-specific) |
-| `@bcm.softDelete` | `deletedAt` timestamp + filtered queries |
-| `@bcm.auth(roles: [ADMIN])` | Role-based access control |
+| ~~`@bcm.searchable`~~ | ✅ Implemented — full-text search via `?search=term` |
+| ~~`@bcm.softDelete`~~ | ✅ Implemented — `deletedAt` timestamp + filtered queries |
+| ~~`bcm eject` command~~ | ✅ Implemented — strip BCM comments, add bootstrap note |
+| ~~`@bcm.auth(roles: [ADMIN])`~~ | ✅ Implemented — RBAC via `authorize()` middleware |
 | `--watch` mode | Regenerate on schema changes |
-| Nested relation handling | `author: { create: {...} }` |
+| ~~Nested relation handling~~ | ✅ Implemented — `@bcm.nested` with create/connect syntax |
 | `bcm.config.js` | Custom templates, naming conventions |
 | Framework choice | `--framework express\|fastify\|hono` |
-| `bcm eject` command | Strip BCM comments, add bootstrap note |
 
 ### 🚀 v2.0 (Future)
 
@@ -352,8 +353,8 @@ npm run dev
 | GraphQL generation | Optional alongside REST |
 | Plugin system | Custom generators |
 | VS Code extension | Schema validation, autocomplete |
-| Web playground | Paste schema → preview generated code online |
-| Multiple databases | MySQL, SQLite, MongoDB |
+| ~~Web playground~~ | ✅ Implemented — `packages/playground/` with Monaco editor |
+| ~~Multiple databases~~ | ✅ Implemented — PostgreSQL, MySQL, SQLite, MongoDB |
 
 ---
 
@@ -477,15 +478,13 @@ docker-compose up
 
 ---
 
-## Monetization Strategy
+## Open Source
 
-| Tier | Features | Price |
-|------|----------|-------|
-| **Open Source** | Core generation, all MVP directives, JWT auth scaffold, Docker, CI | Free |
-| **Pro** | RBAC (`@bcm.auth`), soft delete, `--watch` mode, framework choice, custom templates, priority support | $29/month |
-| **Enterprise** | Custom generators, SLA, white-label, dedicated support | Contact |
+Backend Creator is fully free and open source under the [MIT license](../LICENSE).
+All features — including RBAC (`@bcm.auth`), soft delete, nested relations, multi-database support,
+and the web playground — are available at no cost.
 
-> **Rationale:** JWT auth scaffold stays in the free tier — unauthenticated APIs are rarely useful, and gating auth makes the free tier feel incomplete. Pro tier gates *advanced* auth (RBAC) and customization features.
+Contributions are welcome. See [CONTRIBUTING.md](../CONTRIBUTING.md) to get started.
 
 ---
 
@@ -545,7 +544,7 @@ docker-compose up
 4. **Ejectable Philosophy:** No lock-in, users own their code completely
 5. **Truly Production-Ready:** Not just CRUD — CORS, logging, Docker, CI, health checks, RFC 7807 errors
 6. **Extensible Core:** The generation engine can be reused for other frameworks (Fastify, Hono)
-7. **Clear Monetization Path:** OSS core with paid premium features
+7. **Fully Open Source:** MIT license — all features free, no paid tiers, community-driven
 
 ---
 
@@ -570,7 +569,7 @@ docker-compose up
 - `bcm eject` command for clean separation
 
 ### ✅ Adopted: Production-Ready Scaffolds
-- JWT auth middleware included in free tier (P0)
+- JWT auth middleware included (P0)
 - CORS, rate limiting, structured logging (Pino)
 - RFC 7807 error responses for API consumers
 - Dockerfile + docker-compose for modern deployment
@@ -582,7 +581,7 @@ docker-compose up
 - No need for custom Handlebars helpers
 
 ### ✅ Adopted: Auth & Test Scaffolds
-- Basic JWT middleware included in MVP (free tier)
+- Basic JWT middleware included in MVP
 - Supertest examples for each model
 - Faker-based database seed for immediate developer convenience (`npm run seed` populates realistic data)
 - "Production-ready" means testable, observable, and deployable

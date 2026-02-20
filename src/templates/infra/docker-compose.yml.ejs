@@ -1,3 +1,96 @@
+<% const dbName = h.toSnakeCase(projectName || 'app'); -%>
+<% if (provider === 'sqlite') { -%>
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:./data/<%= dbName %>.db
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}
+    volumes:
+      - appdata:/app/data
+    restart: unless-stopped
+
+volumes:
+  appdata:
+<% } else if (provider === 'mysql') { -%>
+# SECURITY: Set MYSQL_PASSWORD and JWT_SECRET in a .env file
+# before deploying to production. Do not commit credentials to source control.
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=mysql://${MYSQL_USER:-root}:${MYSQL_PASSWORD:-root}@db:3306/<%= dbName %>
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: mysql:8
+    environment:
+      MYSQL_DATABASE: <%= dbName %>
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-root}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysqldata:
+<% } else if (provider === 'mongodb') { -%>
+# SECURITY: Set MONGO_PASSWORD and JWT_SECRET in a .env file
+# before deploying to production. Do not commit credentials to source control.
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=mongodb://${MONGO_USER:-mongo}:${MONGO_PASSWORD:-mongo}@db:27017/<%= dbName %>?authSource=admin
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-mongo}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-mongo}
+      MONGO_INITDB_DATABASE: <%= dbName %>
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongodata:
+<% } else { -%>
 # SECURITY: Set POSTGRES_USER, POSTGRES_PASSWORD, and JWT_SECRET in a .env file
 # before deploying to production. Do not commit credentials to source control.
 version: '3.8'
@@ -9,7 +102,7 @@ services:
       - "${PORT:-3000}:3000"
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/<%= h.toSnakeCase(projectName || 'app') %>?schema=public
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/<%= dbName %>?schema=public
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}
     depends_on:
       db:
@@ -19,7 +112,7 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: <%= h.toSnakeCase(projectName || 'app') %>
+      POSTGRES_DB: <%= dbName %>
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
@@ -34,3 +127,4 @@ services:
 
 volumes:
   pgdata:
+<% } -%>

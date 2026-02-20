@@ -1,6 +1,7 @@
 import { prisma } from '../../config/database.js';
 import type { QueryOptions } from '../../utils/query-builder.js';
 import { ProblemDetail } from '../../middlewares/error.middleware.js';
+import type { <%= model.name %> } from '@prisma/client';
 import type { Create<%= model.name %>Input, Patch<%= model.name %>Input } from './<%= h.toCamelCase(model.name) %>.dto.js';
 
 /**
@@ -11,16 +12,24 @@ export class <%= model.name %>Service {
   /**
    * Find many <%= h.pluralize(h.toCamelCase(model.name)) %> with pagination, sorting, and filtering.
    */
-  async findMany(options: QueryOptions): Promise<{ data: unknown[]; total: number }> {
+  async findMany(options: QueryOptions): Promise<{ data: <%= model.name %>[]; total: number }> {
     const [data, total] = await Promise.all([
       prisma.<%= h.toCamelCase(model.name) %>.findMany({
+<% if (isSoftDelete) { %>
+        where: { ...options.where, deletedAt: null },
+<% } else { %>
         where: options.where,
+<% } %>
         orderBy: options.orderBy,
         skip: options.skip,
         take: options.take,
         include: options.include,
       }),
+<% if (isSoftDelete) { %>
+      prisma.<%= h.toCamelCase(model.name) %>.count({ where: { ...options.where, deletedAt: null } }),
+<% } else { %>
       prisma.<%= h.toCamelCase(model.name) %>.count({ where: options.where }),
+<% } %>
     ]);
     return { data, total };
   }
@@ -28,9 +37,13 @@ export class <%= model.name %>Service {
   /**
    * Find a single <%= h.toCamelCase(model.name) %> by ID.
    */
-  async findById(id: string, include?: Record<string, boolean>): Promise<unknown | null> {
+  async findById(id: string, include?: Record<string, boolean>): Promise<<%= model.name %> | null> {
     return prisma.<%= h.toCamelCase(model.name) %>.findUnique({
+<% if (isSoftDelete) { %>
+      where: { id, deletedAt: null },
+<% } else { %>
       where: { id },
+<% } %>
       include,
     });
   }
@@ -38,9 +51,16 @@ export class <%= model.name %>Service {
   /**
    * Create a new <%= h.toCamelCase(model.name) %>.
    */
-  async create(data: Create<%= model.name %>Input): Promise<unknown> {
+  async create(data: Create<%= model.name %>Input): Promise<<%= model.name %>> {
     try {
+<% if (nestedRelations.length > 0) { -%>
+      return await prisma.<%= h.toCamelCase(model.name) %>.create({
+        data,
+        include: { <%= nestedRelations.map(nr => nr.name + ': true').join(', ') %> },
+      });
+<% } else { -%>
       return await prisma.<%= h.toCamelCase(model.name) %>.create({ data });
+<% } -%>
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2002') {
         throw new ProblemDetail({
@@ -57,7 +77,7 @@ export class <%= model.name %>Service {
   /**
    * Update a <%= h.toCamelCase(model.name) %> by ID.
    */
-  async update(id: string, data: Create<%= model.name %>Input | Patch<%= model.name %>Input): Promise<unknown> {
+  async update(id: string, data: Create<%= model.name %>Input | Patch<%= model.name %>Input): Promise<<%= model.name %>> {
     try {
       return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: { id }, data });
     } catch (error: unknown) {
@@ -89,7 +109,14 @@ export class <%= model.name %>Service {
    */
   async delete(id: string): Promise<void> {
     try {
+<% if (isSoftDelete) { %>
+      await prisma.<%= h.toCamelCase(model.name) %>.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+<% } else { %>
       await prisma.<%= h.toCamelCase(model.name) %>.delete({ where: { id } });
+<% } %>
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2025') {
         throw new ProblemDetail({

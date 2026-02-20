@@ -3,10 +3,10 @@
 // ============================================================
 
 /** Prisma field directives extracted from /// @bcm.* comments */
-export type FieldDirective = 'hidden' | 'readonly' | 'writeOnly';
+export type FieldDirective = 'hidden' | 'readonly' | 'writeOnly' | 'searchable' | 'nested' | 'identifier' | 'password';
 
-/** Directives that apply at the model level (v1.1+) */
-export type ModelDirective = 'protected' | 'softDelete';
+/** Directives that apply at the model level */
+export type ModelDirective = 'protected' | 'softDelete' | 'auth' | 'authModel';
 
 /** Complete parsed schema representation */
 export interface ParsedSchema {
@@ -20,6 +20,13 @@ export interface ModelDefinition {
     name: string;
     fields: FieldDefinition[];
     directives: ModelDirective[];
+    authRoles?: string[];
+    /** True if this model is marked @bcm.authModel (used for login) */
+    isAuthModel?: boolean;
+    /** Field name marked @bcm.identifier (login credential, e.g. email) */
+    identifierField?: string;
+    /** Field name marked @bcm.password (login password; implies writeOnly) */
+    passwordField?: string;
 }
 
 /** A single field within a model */
@@ -37,12 +44,16 @@ export interface FieldDefinition {
     isUnique: boolean;
     /** Whether this field is a relation (references another model) */
     isRelation: boolean;
+    /** Whether this field references an enum type */
+    isEnum: boolean;
     /** If a relation, the target model name */
     relationModel?: string;
     /** If a relation, the local FK field name */
     relationField?: string;
     /** Whether this field has a @default() value */
     hasDefault: boolean;
+    /** True if the default is server-generated (uuid(), now(), autoincrement(), @updatedAt). False for user-overridable literals (false, 0, "USER"). */
+    isServerDefault: boolean;
     /** The default value expression if present */
     defaultValue?: string;
     /** @bcm.* directives applied to this field */

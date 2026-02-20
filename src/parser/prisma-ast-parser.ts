@@ -8,6 +8,7 @@ import type {
 } from './types.js';
 import { parseDirectives, getFieldDirectives } from './directive-parser.js';
 import type { ModelDirectivesResult } from './directive-parser.js';
+import { PRISMA_SCALAR_TYPES } from '../generator/template-engine.js';
 
 /** Attribute node from @mrleebo/prisma-ast (e.g., @id, @unique, @default, @relation) */
 interface AstAttribute {
@@ -72,9 +73,17 @@ export function parsePrismaAst(schemaContent: string): ParsedSchema {
     const enums: EnumDefinition[] = [];
     let datasource: DatasourceConfig = { provider: 'postgresql', url: 'env("DATABASE_URL")' };
 
+    // First pass: collect enum names for distinguishing enums from relations
+    const enumNames = new Set<string>();
+    for (const block of ast.list as AstBlock[]) {
+        if (block.type === 'enum') {
+            enumNames.add(block.name);
+        }
+    }
+
     for (const block of ast.list as AstBlock[]) {
         if (block.type === 'model') {
-            models.push(parseModelBlock(block, directivesMap));
+            models.push(parseModelBlock(block, directivesMap, enumNames));
         } else if (block.type === 'enum') {
             enums.push(parseEnumBlock(block));
         } else if (block.type === 'datasource') {
@@ -87,7 +96,8 @@ export function parsePrismaAst(schemaContent: string): ParsedSchema {
 
 function parseModelBlock(
     block: AstBlock,
-    directivesMap: Map<string, ModelDirectivesResult>
+    directivesMap: Map<string, ModelDirectivesResult>,
+    enumNames: Set<string>
 ): ModelDefinition {
     const modelName: string = block.name;
     const fields: FieldDefinition[] = [];
@@ -116,6 +126,9 @@ function parseModelBlock(
         const defaultValue = defaultAttr
             ? extractDefaultValue(defaultAttr)
             : undefined;
+        // Server-generated: @updatedAt or a function-call default like uuid(), now(), autoincrement()
+        const isServerDefault = attributes.some((a) => a.name === 'updatedAt') ||
+            (defaultValue !== undefined && defaultValue.includes('('));
 
         // Detect relations
         const relationAttr = attributes.find((a) => a.name === 'relation');
@@ -126,11 +139,20 @@ function parseModelBlock(
         if (isRelation && relationAttr) {
             const relArgs: AstArg[] = relationAttr.args || [];
             for (const arg of relArgs) {
-                if (arg.name === 'fields') {
+                // prisma-ast wraps named args as { value: { type: 'keyValue', key: ..., value: ... } }
+                const argAny = arg as Record<string, unknown>;
+                const keyValue = argAny.value as { type?: string; key?: string; value?: AstValue } | undefined;
+                const argKey = arg.name || (keyValue?.type === 'keyValue' ? keyValue.key : undefined);
+
+                if (argKey === 'fields') {
                     // Extract FK field name(s)
-                    relationField = extractArrayArg(arg);
+                    if (keyValue?.type === 'keyValue' && keyValue.value) {
+                        relationField = extractArrayArgFromValue(keyValue.value);
+                    } else {
+                        relationField = extractArrayArg(arg);
+                    }
                 }
-                if (arg.name === 'references') {
+                if (argKey === 'references') {
                     // The referenced model is the field type
                     relationModel = fieldType;
                 }
@@ -140,12 +162,18 @@ function parseModelBlock(
             }
         }
 
-        // Also detect implicit relations (field type matches a model name, is a list, no @relation)
-        // These will be picked up as relation fields without a FK
-        const isImplicitRelation = !isRelation && (isList || isNonScalarType(fieldType));
+        // Check if this field references an enum type
+        const isEnum = enumNames.has(fieldType);
 
-        // Get directives
-        const directives = getFieldDirectives(directivesMap, modelName, fieldName);
+        // Also detect implicit relations (field type matches a model name, is a list, no @relation)
+        // Enum types are NOT relations — they are scalar-like values
+        const isImplicitRelation = !isRelation && !isEnum && (isList || isNonScalarType(fieldType));
+
+        // Get directives; @bcm.password implies writeOnly (excluded from responses)
+        const rawDirectives = getFieldDirectives(directivesMap, modelName, fieldName);
+        const directives = rawDirectives.includes('password') && !rawDirectives.includes('writeOnly')
+            ? [...rawDirectives, 'writeOnly' as const]
+            : rawDirectives;
 
         fields.push({
             name: fieldName,
@@ -155,19 +183,34 @@ function parseModelBlock(
             isId,
             isUnique,
             isRelation: isRelation || isImplicitRelation,
+            isEnum,
             relationModel: isRelation || isImplicitRelation ? fieldType : undefined,
             relationField,
             hasDefault,
+            isServerDefault,
             defaultValue,
             directives,
         });
     }
 
     const modelResult = directivesMap.get(modelName);
+    const modelDirectives = modelResult?.modelDirectives ?? [];
+    const isAuthModel = modelDirectives.includes('authModel');
+    const identifierField = isAuthModel
+        ? fields.find(f => f.directives.includes('identifier'))?.name
+        : undefined;
+    const passwordField = isAuthModel
+        ? fields.find(f => f.directives.includes('password'))?.name
+        : undefined;
+
     return {
         name: modelName,
         fields,
-        directives: modelResult?.modelDirectives ?? [],
+        directives: modelDirectives,
+        authRoles: modelResult?.authRoles,
+        isAuthModel,
+        identifierField,
+        passwordField,
     };
 }
 
@@ -186,7 +229,9 @@ function parseDatasourceBlock(block: AstBlock): DatasourceConfig {
     let provider = 'postgresql';
     let url = 'env("DATABASE_URL")';
 
-    const assignments = (block.properties || []) as AstProperty[];
+    // prisma-ast uses "assignments" for datasource blocks, not "properties"
+    const blockAny = block as unknown as Record<string, unknown>;
+    const assignments = (blockAny.assignments || block.properties || []) as AstProperty[];
     for (const a of assignments) {
         if (a.type === 'assignment') {
             if (a.key === 'provider') {
@@ -205,11 +250,7 @@ function parseDatasourceBlock(block: AstBlock): DatasourceConfig {
  * Check if a type is non-scalar (i.e., references another model or enum).
  */
 function isNonScalarType(type: string): boolean {
-    const scalarTypes = new Set([
-        'String', 'Int', 'Float', 'Boolean', 'DateTime',
-        'Json', 'Bytes', 'BigInt', 'Decimal',
-    ]);
-    return !scalarTypes.has(type);
+    return !PRISMA_SCALAR_TYPES.has(type);
 }
 
 function extractDefaultValue(attr: AstAttribute): string | undefined {
@@ -224,10 +265,13 @@ function extractDefaultValue(attr: AstAttribute): string | undefined {
 }
 
 function extractArrayArg(arg: AstArg): string | undefined {
-    const val = arg.value;
+    return extractArrayArgFromValue(arg.value);
+}
+
+function extractArrayArgFromValue(val: AstValue | undefined): string | undefined {
     if (typeof val === 'object' && val !== null && 'type' in val && val.type === 'array') {
-        const arr = val as { type: 'array'; args?: Array<{ value?: string | number }> };
-        return arr.args?.map((a) => a.value ?? a).join(', ');
+        const arr = val as { type: 'array'; args?: Array<string | number | { value?: string | number }> };
+        return arr.args?.map((a) => (typeof a === 'object' && a !== null && 'value' in a) ? a.value ?? a : a).join(', ');
     }
     if (typeof val === 'string') return val;
     return undefined;

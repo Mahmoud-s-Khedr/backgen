@@ -1,0 +1,52 @@
+// Example 6: Organization Chart
+// Complexity: Three models with self-referential relation
+// Demonstrates: self-referential relations, @bcm.searchable, @bcm.readonly
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Department {
+  id        String     @id @default(uuid())
+  /// @bcm.searchable
+  name      String     @unique
+  employees Employee[]
+  projects  Project[]
+  /// @bcm.readonly
+  createdAt DateTime   @default(now())
+}
+
+model Employee {
+  id           String     @id @default(uuid())
+  /// @bcm.searchable
+  name         String
+  email        String     @unique
+  title        String
+  department   Department @relation(fields: [departmentId], references: [id])
+  departmentId String
+  manager      Employee?  @relation("ManagerReports", fields: [managerId], references: [id])
+  managerId    String?
+  reports      Employee[] @relation("ManagerReports")
+  projects     Project[]
+  /// @bcm.readonly
+  hiredAt      DateTime   @default(now())
+}
+
+model Project {
+  id           String     @id @default(uuid())
+  /// @bcm.searchable
+  name         String
+  description  String?
+  budget       Float?
+  department   Department @relation(fields: [departmentId], references: [id])
+  departmentId String
+  lead         Employee   @relation(fields: [leadId], references: [id])
+  leadId       String
+  /// @bcm.readonly
+  createdAt    DateTime   @default(now())
+}

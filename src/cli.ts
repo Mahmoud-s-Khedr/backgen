@@ -42,7 +42,7 @@ program
     .option('--dry-run', 'Preview generated files without writing to disk', false)
     .option(
         '--only <part>',
-        'Generate only a specific part (routes, swagger, config, middleware)'
+        'Generate only a specific part (routes, config, middleware, utils, app, infra, prisma, swagger)'
     )
     .option('--force', 'Overwrite existing output directory', false)
     .action(generateCommand);

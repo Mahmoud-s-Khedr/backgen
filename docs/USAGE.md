@@ -12,12 +12,13 @@ This guide walks you through everything you need to use **Backend Creator (bcm)*
 4. [Generating the Backend](#generating-the-backend)
 5. [Running the Generated API](#running-the-generated-api)
 6. [Using Directives](#using-directives)
-7. [API Endpoints](#api-endpoints)
-8. [Query Parameters](#query-parameters)
-9. [Error Handling](#error-handling)
-10. [Ejecting](#ejecting)
-11. [Regenerating Specific Parts](#regenerating-specific-parts)
-12. [Docker Deployment](#docker-deployment)
+7. [Authentication](#authentication)
+8. [API Endpoints](#api-endpoints)
+9. [Query Parameters](#query-parameters)
+10. [Error Handling](#error-handling)
+11. [Ejecting](#ejecting)
+12. [Regenerating Specific Parts](#regenerating-specific-parts)
+13. [Docker Deployment](#docker-deployment)
 
 ---
 
@@ -92,11 +93,13 @@ enum PostStatus {
   ARCHIVED
 }
 
+/// @bcm.authModel
 model User {
   id        String   @id @default(cuid())
+  /// @bcm.identifier
   email     String   @unique
   name      String
-  /// @bcm.writeOnly
+  /// @bcm.password
   password  String
   role      Role     @default(USER)
   bio       String?
@@ -239,17 +242,17 @@ Directives are applied as `/// @bcm.*` comments directly above a field in your P
 
 The field is accepted in create and update requests but **never returned** in responses.
 
-**Use case**: Passwords, internal tokens, secrets.
+**Use case**: Internal tokens, secrets. For passwords specifically, prefer `@bcm.password` (see below) which also generates a login endpoint.
 
 ```prisma
 model User {
   /// @bcm.writeOnly
-  password String
+  apiToken String
 }
 ```
 
-- `POST /api/users` → `password` is **accepted** in request body
-- `GET /api/users/:id` → `password` is **excluded** from response
+- `POST /api/users` → `apiToken` is **accepted** in request body
+- `GET /api/users/:id` → `apiToken` is **excluded** from response
 
 ### `@bcm.readonly`
 
@@ -271,7 +274,7 @@ model Post {
 
 The field is **excluded** from all API input and output. It exists in the database but is invisible to the API.
 
-**Use case**: Internal flags, soft-delete markers, audit columns.
+**Use case**: Internal flags, audit columns.
 
 ```prisma
 model User {
@@ -283,6 +286,312 @@ model User {
 - Not in request body
 - Not in response body
 - Only accessible via Prisma directly
+
+### `@bcm.searchable`
+
+The field is included in full-text search when using the `?search=term` query parameter.
+
+**Use case**: Titles, names, descriptions — any text field users should be able to search.
+
+```prisma
+model Post {
+  /// @bcm.searchable
+  title   String
+  /// @bcm.searchable
+  content String?
+}
+```
+
+- `GET /api/posts?search=hello` → searches `title` and `content` with case-insensitive `contains`
+- Multiple searchable fields are combined with OR logic
+
+### `@bcm.nested` (field-level)
+
+Enables nested create/connect operations for a relation field. Place on a single relation field (not list relations).
+
+**Use case**: Creating or linking related records in a single API call.
+
+```prisma
+model Post {
+  id       String @id @default(cuid())
+  title    String
+  authorId String
+  /// @bcm.nested
+  author   User   @relation(fields: [authorId], references: [id])
+}
+```
+
+This generates a Zod input schema that accepts either `create` or `connect`:
+
+```typescript
+const Post_AuthorInput = z.object({
+  create: z.object({ email: z.string(), name: z.string() }).optional(),
+  connect: z.object({ id: z.string() }).optional(),
+}).refine(data => data.create || data.connect, {
+  message: 'Either create or connect must be provided',
+});
+```
+
+API usage:
+
+```json
+// Connect to existing user
+POST /api/posts
+{ "title": "My Post", "author": { "connect": { "id": "user-123" } } }
+
+// Create user inline
+POST /api/posts
+{ "title": "My Post", "author": { "create": { "email": "new@example.com", "name": "Jane" } } }
+```
+
+**Notes**:
+- Only single relations are supported (not list relations like `Post[]`)
+- The FK field (`authorId`) is automatically excluded from the create schema when `@bcm.nested` is used
+- Nested responses auto-include the related record
+
+### `@bcm.identifier` (field-level)
+
+Marks the login credential field (e.g., email, username) on an `@bcm.authModel` model. Must be unique in the database.
+
+```prisma
+/// @bcm.authModel
+model User {
+  id    String @id @default(uuid())
+  /// @bcm.identifier
+  email String @unique
+  /// @bcm.password
+  password String
+}
+```
+
+- Only meaningful when on a model also marked `@bcm.authModel`
+- The value of this field is included in the generated JWT payload
+
+### `@bcm.password` (field-level)
+
+Marks the password field on an `@bcm.authModel` model. Implies `@bcm.writeOnly` — the field is accepted on create/update but **never** returned in responses.
+
+```prisma
+/// @bcm.authModel
+model User {
+  id    String @id @default(uuid())
+  /// @bcm.identifier
+  email String @unique
+  /// @bcm.password
+  password String
+}
+```
+
+- Automatically excluded from all GET responses without needing `@bcm.writeOnly`
+- Cannot be combined with `@bcm.hidden`, `@bcm.readonly`, or `@bcm.writeOnly` (conflicting directives produce a warning)
+
+### `@bcm.authModel` (model-level)
+
+Designates this model as the authentication source. Generates a `POST /api/auth/login` endpoint. Must be combined with `@bcm.identifier` and `@bcm.password` field directives on the same model.
+
+```prisma
+/// @bcm.authModel
+model User {
+  id       String @id @default(uuid())
+  /// @bcm.identifier
+  email    String @unique
+  name     String
+  /// @bcm.password
+  password String
+  role     Role   @default(USER)
+}
+```
+
+**Generated endpoint:**
+
+```
+POST /api/auth/login
+Content-Type: application/json
+
+{ "email": "user@example.com", "password": "secret" }
+```
+
+**Success response (200):**
+
+```json
+{
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  }
+}
+```
+
+**Error response (401):**
+
+```json
+{
+  "type": "unauthorized",
+  "title": "Invalid credentials",
+  "status": 401,
+  "detail": "Invalid email or password."
+}
+```
+
+**Notes:**
+- Only one `@bcm.authModel` per schema is supported
+- The generated file is `src/modules/auth/auth.routes.ts`
+- The endpoint is documented in the Swagger spec under the `Auth` tag
+- JWT expires in 7 days; payload includes `id` and the identifier field value
+
+### `@bcm.protected` (model-level)
+
+Place this directive on the line immediately before the `model` keyword. Mutation routes (POST, PUT, PATCH, DELETE) require a valid JWT token. GET routes remain public.
+
+```prisma
+/// @bcm.protected
+model Post {
+  id    String @id @default(cuid())
+  title String
+}
+```
+
+### `@bcm.auth(roles: [...])` (model-level)
+
+Like `@bcm.protected`, but also enforces role-based access control. The JWT payload must include a `role` field matching one of the specified roles.
+
+```prisma
+/// @bcm.auth(roles: [ADMIN])
+model AdminSettings {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
+}
+
+/// @bcm.auth(roles: [ADMIN, MODERATOR])
+model Report {
+  id    String @id @default(uuid())
+  title String
+}
+```
+
+- GET routes remain public
+- POST, PUT, PATCH, DELETE require a valid JWT **and** one of the listed roles
+- Returns `401 Unauthorized` if no valid JWT is present
+- Returns `403 Forbidden` if the user's role is not in the allowed list
+- The generated `authorize()` middleware reads `req.user.role` from the decoded JWT
+
+### `@bcm.softDelete` (model-level)
+
+Enables soft delete for the model. The `DELETE` endpoint sets a `deletedAt` timestamp instead of permanently removing the record. All queries automatically filter out soft-deleted records.
+
+**Requires**: A `deletedAt DateTime?` field on the model.
+
+```prisma
+/// @bcm.softDelete
+model Post {
+  id        String    @id @default(cuid())
+  title     String
+  deletedAt DateTime?
+}
+```
+
+- `DELETE /api/posts/:id` → sets `deletedAt = new Date()` instead of hard delete
+- `GET /api/posts` → only returns records where `deletedAt` is null
+- `GET /api/posts/:id` → returns 404 for soft-deleted records
+
+---
+
+## Authentication
+
+Backend Creator generates a complete authentication flow from three directives in your schema.
+
+### Setup
+
+```prisma
+/// @bcm.authModel
+model User {
+  id       String @id @default(uuid())
+  /// @bcm.identifier
+  email    String @unique
+  name     String
+  /// @bcm.password
+  password String
+  role     Role   @default(USER)
+}
+
+/// @bcm.protected
+model Post {
+  id       String @id @default(cuid())
+  title    String
+  authorId String
+}
+```
+
+### Step-by-step flow
+
+**1. Create a user**
+
+```bash
+POST /api/users
+{ "email": "alice@example.com", "name": "Alice", "password": "secret123" }
+```
+
+Response — note that `password` is never returned:
+
+```json
+{ "data": { "id": "...", "email": "alice@example.com", "name": "Alice", "role": "USER" } }
+```
+
+**2. Log in**
+
+```bash
+POST /api/auth/login
+{ "email": "alice@example.com", "password": "secret123" }
+```
+
+Response:
+
+```json
+{ "data": { "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." } }
+```
+
+**3. Use the token**
+
+Include the JWT in the `Authorization` header for protected endpoints:
+
+```bash
+POST /api/posts
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+{ "title": "My First Post", "authorId": "..." }
+```
+
+**4. Test in Swagger UI**
+
+1. Open [http://localhost:3000/api/docs](http://localhost:3000/api/docs)
+2. Call `POST /api/auth/login` and copy the `token` value
+3. Click the **Authorize** button (top right)
+4. Enter `Bearer <token>` and click **Authorize**
+5. All subsequent calls from Swagger UI will include the token
+
+### Role-based access control
+
+Combine `@bcm.authModel` with `@bcm.auth(roles: [...])` for fine-grained access:
+
+```prisma
+/// @bcm.authModel
+model User {
+  id       String @id @default(uuid())
+  /// @bcm.identifier
+  email    String @unique
+  /// @bcm.password
+  password String
+  role     Role   @default(USER)
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model AdminSettings {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
+}
+```
+
+The JWT payload includes the `role` field. The `authorize()` middleware checks `req.user.role` against the allowed list and returns `403 Forbidden` if the user's role is not permitted.
 
 ---
 
@@ -313,6 +622,7 @@ The endpoint name is the **camelCase, pluralized** version of the model name:
 |----------|-------------|
 | `GET /health` | Health check with uptime and timestamp |
 | `GET /api/docs` | Swagger UI with interactive API documentation |
+| `POST /api/auth/login` | Login and receive a JWT token (generated when `@bcm.authModel` is used) |
 
 ---
 
@@ -349,7 +659,7 @@ Response includes pagination metadata:
 GET /api/posts?sort=createdAt&order=desc
 ```
 
-- `sort` — Field name to sort by (default: `createdAt`)
+- `sort` — Field name to sort by (default: `id`); validated against allowed fields
 - `order` — `asc` or `desc` (default: `desc`)
 
 ### Filtering
@@ -362,6 +672,14 @@ Filters are passed as `filter[fieldName]=value`. The query builder auto-detects 
 - Numbers → exact match
 - Booleans (`true`/`false`) → exact match
 - Strings → case-insensitive `contains` search
+
+### Searching
+
+```
+GET /api/posts?search=hello
+```
+
+Searches across all fields marked with `@bcm.searchable` using case-insensitive `contains` matching. Multiple searchable fields are combined with OR logic.
 
 ### Including Relations
 
@@ -405,9 +723,14 @@ All errors follow the [RFC 7807](https://tools.ietf.org/html/rfc7807) Problem De
 | Status | Type | When |
 |--------|------|------|
 | 401 | `unauthorized` | Missing or invalid JWT token |
+| 401 | `token-expired` | JWT token has expired |
+| 403 | `forbidden` | User's role is not authorized (`@bcm.auth`) |
 | 404 | `not-found` | Record not found by ID |
 | 409 | `unique-constraint` | Duplicate value on unique field |
 | 422 | `validation-error` | Zod validation failed |
+| 422 | `foreign-key-constraint` | Referenced record not found |
+| 422 | `null-constraint` | Required field received null |
+| 422 | `value-too-long` | Value exceeds column length |
 | 429 | `rate-limit-exceeded` | Too many requests |
 | 500 | `internal-server-error` | Unexpected server error |
 
@@ -460,18 +783,65 @@ Available `--only` values:
 
 ---
 
+## Multi-Database Support
+
+Backend Creator supports multiple database providers via the Prisma `datasource` block. Change the `provider` value to generate provider-aware infrastructure:
+
+```prisma
+datasource db {
+  provider = "mysql"      // postgresql | mysql | sqlite | mongodb
+  url      = env("DATABASE_URL")
+}
+```
+
+### What changes per provider
+
+| Component | PostgreSQL | MySQL | SQLite | MongoDB |
+|-----------|-----------|-------|--------|---------|
+| Docker Compose | `postgres:16-alpine` | `mysql:8` | No DB service | `mongo:7` |
+| CI service | PostgreSQL service | MySQL service | No service | MongoDB service |
+| `.env.example` | `postgresql://...` | `mysql://...` | `file:./dev.db` | `mongodb://...` |
+| Migrations | `prisma migrate dev` | `prisma migrate dev` | `prisma migrate dev` | `prisma db push` |
+| Case-insensitive search | `mode: 'insensitive'` | `mode: 'insensitive'` | Omitted | Omitted |
+
+### SQLite (simplest setup)
+
+SQLite requires no database service — data is stored in a local file:
+
+```prisma
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+```
+
+### MongoDB (experimental)
+
+MongoDB uses `prisma db push` instead of migrations and has different relation handling. Some Prisma features may not be available.
+
+```prisma
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+```
+
+---
+
 ## Docker Deployment
 
 The generated project includes Docker files ready for production:
 
 ```bash
-# Start with Docker Compose (app + PostgreSQL)
+# Start with Docker Compose (app + database)
 docker-compose up
 
 # Or build just the app image
 docker build -t my-api .
 docker run -p 3000:3000 --env-file .env my-api
 ```
+
+The Docker Compose file is provider-aware — it includes the correct database image and configuration for your chosen provider (PostgreSQL, MySQL, MongoDB, or no service for SQLite).
 
 The Dockerfile uses a multi-stage build:
 1. **Build stage** — installs deps, generates Prisma client, compiles TypeScript
@@ -483,10 +853,46 @@ The Dockerfile uses a multi-stage build:
 
 | Variable | Required | Default | Description |
 |----------|:---:|---------|-------------|
-| `DATABASE_URL` | ✓ | — | PostgreSQL connection string |
+| `DATABASE_URL` | ✓ | — | Database connection string (format depends on provider) |
 | `JWT_SECRET` | ✓ | — | Secret for JWT signing (min 32 chars) |
 | `NODE_ENV` | | `development` | Environment mode |
 | `PORT` | | `3000` | Server port |
 | `CORS_ORIGIN` | | `*` (dev only) | Allowed CORS origin; must be set in production (disabled if absent) |
 | `LOG_LEVEL` | | `info` | Pino log level |
+| `JSON_LIMIT` | | `1mb` | Maximum JSON body size |
+| `SEED_COUNT` | | `5` | Number of records per model when seeding |
+| `SHUTDOWN_TIMEOUT` | | `30000` | Graceful shutdown timeout in milliseconds |
 | `RATE_LIMIT_MAX` | | `100` | Max requests per 15-min window |
+
+---
+
+## Web Playground
+
+The web playground lets you paste a Prisma schema and instantly preview all generated code — no installation required.
+
+### Running locally
+
+```bash
+cd packages/playground
+npm install
+npm run dev       # Development server with hot reload
+npm run build     # Production build
+npm run preview   # Preview production build
+```
+
+### How it works
+
+The playground runs 100% client-side:
+- **Parser**: `@mrleebo/prisma-ast` (same as the CLI) runs in the browser
+- **Templates**: All 27 EJS templates are pre-bundled as strings at build time
+- **Generation**: All generators (modules, config, infra, swagger) run in the browser
+- **Download**: `jszip` creates a ZIP file with all generated files
+
+### Interface
+
+The playground has three panels:
+1. **Schema editor** (left) — Monaco Editor with Prisma syntax highlighting
+2. **File tree** (center) — generated file listing grouped by directory
+3. **Code preview** (right) — read-only Monaco Editor showing the selected file
+
+Code regenerates automatically as you type (300ms debounce).

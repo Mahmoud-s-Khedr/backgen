@@ -1,0 +1,45 @@
+// Example 4: User Profiles
+// Complexity: Three models with one-to-one relations
+// Demonstrates: one-to-one relations, @bcm.hidden, @bcm.writeOnly
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  /// @bcm.writeOnly
+  password  String
+  profile   Profile?
+  settings  Setting?
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+}
+
+model Profile {
+  id        String  @id @default(uuid())
+  firstName String
+  lastName  String
+  bio       String?
+  avatarUrl String?
+  /// @bcm.hidden
+  phoneNumber String?
+  user      User    @relation(fields: [userId], references: [id])
+  userId    String  @unique
+}
+
+model Setting {
+  id              String  @id @default(uuid())
+  theme           String  @default("light")
+  emailNotifications Boolean @default(true)
+  language        String  @default("en")
+  timezone        String  @default("UTC")
+  user            User    @relation(fields: [userId], references: [id])
+  userId          String  @unique
+}

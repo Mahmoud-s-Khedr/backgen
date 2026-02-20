@@ -7,7 +7,14 @@ import ejs from 'ejs';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+// Default import: `pluralize` is CJS with `module.exports = fn`. Named imports not available.
 import pluralizeLib from 'pluralize';
+
+/** Canonical set of Prisma scalar types. Shared by parser and generators. */
+export const PRISMA_SCALAR_TYPES = new Set([
+    'String', 'Int', 'Float', 'Boolean', 'DateTime',
+    'Json', 'Bytes', 'BigInt', 'Decimal',
+]);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -78,6 +85,9 @@ export const helpers: TemplateHelpers = {
             'Bytes': 'z.string()',
             'BigInt': 'z.bigint()',
         };
+        if (!map[prismaType]) {
+            console.warn(`Warning: Unknown Prisma type "${prismaType}", defaulting to z.string()`);
+        }
         return map[prismaType] || `z.string()`;
     },
 
@@ -99,6 +109,20 @@ export const helpers: TemplateHelpers = {
 };
 
 /**
+ * Optional in-memory template store for browser environments.
+ * When set, renderTemplate reads from this map instead of the filesystem.
+ */
+let templateStore: Map<string, string> | null = null;
+
+/**
+ * Set an in-memory template store (for browser/playground use).
+ * Pass null to revert to filesystem-based template loading.
+ */
+export function setTemplateStore(store: Map<string, string> | null): void {
+    templateStore = store;
+}
+
+/**
  * Render an EJS template with data and helpers.
  *
  * @param templateName - Relative path within the templates directory (e.g., 'module/controller.ts.ejs')
@@ -106,27 +130,35 @@ export const helpers: TemplateHelpers = {
  * @returns Rendered template content
  */
 export function renderTemplate(templateName: string, data: Record<string, any>): string {
-    const templatePath = join(TEMPLATES_DIR, templateName);
-
-    // When running from source (dev), templates are in src/templates/
-    // When running from dist, they need to be copied
     let templateContent: string;
-    try {
-        templateContent = readFileSync(templatePath, 'utf-8');
-    } catch {
-        // Fallback: templates may be in src/ when running in development (tsx)
-        const srcPath = join(__dirname, '..', '..', 'src', 'templates', templateName);
+
+    if (templateStore) {
+        // Browser mode: read from in-memory store
+        const content = templateStore.get(templateName);
+        if (!content) {
+            throw new Error(`Template not found in store: "${templateName}"`);
+        }
+        templateContent = content;
+    } else {
+        // Node.js mode: read from filesystem
+        const templatePath = join(TEMPLATES_DIR, templateName);
         try {
-            templateContent = readFileSync(srcPath, 'utf-8');
+            templateContent = readFileSync(templatePath, 'utf-8');
         } catch {
-            throw new Error(
-                `Template not found: "${templateName}"\n  Tried: ${templatePath}\n  Tried: ${srcPath}`
-            );
+            // Fallback: templates may be in src/ when running in development (tsx)
+            const srcPath = join(__dirname, '..', '..', 'src', 'templates', templateName);
+            try {
+                templateContent = readFileSync(srcPath, 'utf-8');
+            } catch {
+                throw new Error(
+                    `Template not found: "${templateName}"\n  Tried: ${templatePath}\n  Tried: ${srcPath}`
+                );
+            }
         }
     }
 
     return ejs.render(templateContent, { ...data, h: helpers }, {
-        filename: templatePath, // For EJS includes
+        filename: templateName, // For EJS includes
         escape: (val: any) => String(val), // Disable HTML escaping — we're generating code, not HTML
     });
 }

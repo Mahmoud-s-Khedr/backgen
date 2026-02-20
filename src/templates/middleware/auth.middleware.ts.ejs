@@ -16,7 +16,7 @@ declare global {
  * JWT Authentication Middleware
  * Verifies Bearer token and attaches decoded user to request.
  */
-export function authMiddleware(req: Request, _res: Response, next: NextFunction): void {
+export function authenticate(req: Request, _res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -50,4 +50,25 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
       detail: 'The authentication token is invalid.',
     }));
   }
+}
+
+/**
+ * Role-Based Authorization Middleware
+ * Checks that the authenticated user has one of the allowed roles.
+ * Must be used after authenticate().
+ */
+export function authorize(...allowedRoles: string[]) {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    const userRole = req.user?.role as string | undefined;
+    if (!userRole || !allowedRoles.includes(userRole)) {
+      return next(new ProblemDetail({
+        type: 'forbidden',
+        title: 'Forbidden',
+        status: 403,
+        detail: `Role '${userRole ?? 'none'}' is not authorized. Required: ${allowedRoles.join(', ')}.`,
+        instance: req.originalUrl,
+      }));
+    }
+    next();
+  };
 }

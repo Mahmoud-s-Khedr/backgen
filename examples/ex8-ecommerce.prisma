@@ -1,0 +1,150 @@
+// Example 8: E-Commerce Platform
+// Complexity: Eight models with complex relations and enums
+// Demonstrates: enums, @bcm.searchable, @bcm.readonly, @bcm.hidden, @bcm.softDelete, @bcm.nested, @bcm.auth
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Customer {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  /// @bcm.searchable
+  name      String
+  /// @bcm.hidden
+  phone     String?
+  addresses Address[]
+  orders    Order[]
+  reviews   Review[]
+  /// @bcm.readonly
+  createdAt DateTime  @default(now())
+}
+
+model Address {
+  id         String   @id @default(uuid())
+  street     String
+  city       String
+  state      String
+  zipCode    String
+  country    String   @default("US")
+  isDefault  Boolean  @default(false)
+  customer   Customer @relation(fields: [customerId], references: [id])
+  customerId String
+  orders     Order[]
+}
+
+/// @bcm.softDelete
+model Product {
+  id          String      @id @default(uuid())
+  /// @bcm.searchable
+  name        String
+  /// @bcm.searchable
+  description String?
+  sku         String      @unique
+  price       Float
+  compareAt   Float?
+  stock       Int         @default(0)
+  category    Category    @relation(fields: [categoryId], references: [id])
+  categoryId  String
+  orderItems  OrderItem[]
+  reviews     Review[]
+  /// @bcm.readonly
+  createdAt   DateTime    @default(now())
+  /// @bcm.readonly
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+}
+
+model Category {
+  id       String    @id @default(uuid())
+  /// @bcm.searchable
+  name     String    @unique
+  slug     String    @unique
+  products Product[]
+}
+
+/// @bcm.protected
+model Order {
+  id         String      @id @default(uuid())
+  orderNumber String     @unique @default(uuid())
+  status     OrderStatus @default(PENDING)
+  /// @bcm.nested
+  customer   Customer    @relation(fields: [customerId], references: [id])
+  customerId String
+  /// @bcm.nested
+  address    Address     @relation(fields: [addressId], references: [id])
+  addressId  String
+  items      OrderItem[]
+  coupon     Coupon?     @relation(fields: [couponId], references: [id])
+  couponId   String?
+  subtotal   Float
+  discount   Float       @default(0)
+  tax        Float       @default(0)
+  total      Float
+  notes      String?
+  /// @bcm.readonly
+  createdAt  DateTime    @default(now())
+  /// @bcm.readonly
+  updatedAt  DateTime    @updatedAt
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  order     Order   @relation(fields: [orderId], references: [id])
+  orderId   String
+  product   Product @relation(fields: [productId], references: [id])
+  productId String
+  quantity  Int
+  unitPrice Float
+  total     Float
+}
+
+model Review {
+  id         String   @id @default(uuid())
+  rating     Int
+  /// @bcm.searchable
+  comment    String?
+  customer   Customer @relation(fields: [customerId], references: [id])
+  customerId String
+  product    Product  @relation(fields: [productId], references: [id])
+  productId  String
+  /// @bcm.readonly
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, productId])
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model Coupon {
+  id          String     @id @default(uuid())
+  code        String     @unique
+  discount    Float
+  type        DiscountType @default(PERCENTAGE)
+  minPurchase Float?
+  maxUses     Int?
+  usedCount   Int        @default(0)
+  orders      Order[]
+  expiresAt   DateTime?
+  /// @bcm.readonly
+  createdAt   DateTime   @default(now())
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}

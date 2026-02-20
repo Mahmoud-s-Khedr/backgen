@@ -1,0 +1,38 @@
+// Example 2: Blog with Authors
+// Complexity: Two models, one-to-many relation
+// Demonstrates: @bcm.authModel, @bcm.identifier, @bcm.password, @bcm.readonly, @bcm.protected
+// Flow: users register first, then create posts as authenticated authors
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id        String   @id @default(uuid())
+  /// @bcm.identifier
+  email     String   @unique
+  name      String
+  /// @bcm.password
+  password  String
+  posts     Post[]
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+}
+
+/// @bcm.protected
+model Post {
+  id        String   @id @default(uuid())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  String
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+}

@@ -1,9 +1,12 @@
 # Backend Creator from Data Model — Implementation Plan
 
+> [!NOTE]
+> **Historical document.** This was the original v1.0 implementation plan. The project has since evolved: `@bcm.searchable` and `@bcm.softDelete` are now implemented, the build system uses esbuild instead of tsc, and `prisma-internals-parser.ts` has been removed. See `CHANGELOG.md` for current features.
+
 A CLI tool (`bcm`) that generates a complete, production-ready Express.js REST API backend from a standard Prisma schema file. Generate once, eject forever.
 
 > [!IMPORTANT]
-> This plan covers the **MVP (v1.0)** scope only. Post-MVP features (`@bcm.searchable`, `@bcm.softDelete`, `@bcm.auth`, `--watch`, etc.) are explicitly excluded.
+> This plan covers the **MVP (v1.0)** scope only. Post-MVP features (`@bcm.auth`, `--watch`, etc.) are explicitly excluded.
 
 ---
 

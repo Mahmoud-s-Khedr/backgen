@@ -1,17 +1,19 @@
 import type { ParsedSchema, GeneratedFile, GenerateOptions } from '../../parser/types.js';
 import { renderTemplate } from '../template-engine.js';
-import { basename } from 'path';
+import { basename, resolve } from 'path';
 
 /**
  * Generate infrastructure files: Dockerfile, docker-compose, CI, .env.example,
  * .gitignore, README, package.json, tsconfig.json.
  */
 export function generateInfraFiles(schema: ParsedSchema, options?: GenerateOptions): GeneratedFile[] {
-    const projectName = options?.output ? basename(options.output) : 'api-server';
+    const resolvedPath = resolve(options?.output || '.');
+    const projectName = basename(resolvedPath) || 'api-server';
     const data = {
         models: schema.models,
         schema,
         projectName,
+        provider: schema.datasource.provider,
     };
 
     return [

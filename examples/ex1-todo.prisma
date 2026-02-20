@@ -1,0 +1,23 @@
+// Example 1: Simple Todo List (SQLite)
+// Complexity: Single model, basic field types
+// Demonstrates: @bcm.readonly, SQLite provider (no Docker DB needed)
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Todo {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  completed   Boolean  @default(false)
+  /// @bcm.readonly
+  createdAt   DateTime @default(now())
+  /// @bcm.readonly
+  updatedAt   DateTime @updatedAt
+}

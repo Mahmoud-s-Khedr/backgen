@@ -1,0 +1,44 @@
+import { Router } from 'express';
+import jwt from 'jsonwebtoken';
+import { z } from 'zod';
+import { prisma } from '../../config/database.js';
+import { env } from '../../config/env.js';
+import { validate } from '../../middlewares/validation.middleware.js';
+import { ProblemDetail } from '../../middlewares/error.middleware.js';
+import { sendSuccess } from '../../utils/response.js';
+
+const router = Router();
+
+const LoginSchema = z.object({
+  <%= identifierField %>: z.string(),
+  <%= passwordField %>: z.string(),
+});
+
+/**
+ * POST /api/auth/login
+ * Authenticate with <%= identifierField %> and <%= passwordField %>, receive a JWT token.
+ */
+router.post('/login', validate(LoginSchema), async (req, res, next) => {
+  try {
+    const { <%= identifierField %>, <%= passwordField %> } = req.body as z.infer<typeof LoginSchema>;
+    const user = await prisma.<%= authModelLower %>.findUnique({ where: { <%= identifierField %> } });
+    if (!user || user.<%= passwordField %> !== <%= passwordField %>) {
+      return next(new ProblemDetail({
+        type: 'unauthorized',
+        title: 'Invalid credentials',
+        status: 401,
+        detail: 'Invalid <%= identifierField %> or <%= passwordField %>.',
+      }));
+    }
+    const token = jwt.sign(
+      { id: user.id, <%= identifierField %>: user.<%= identifierField %> },
+      env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    sendSuccess(res, { token });
+  } catch (error) {
+    next(error);
+  }
+});
+
+export { router as authRoutes };
