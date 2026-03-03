@@ -1,9 +1,9 @@
-# Contributing to Backend Creator (bcm)
+# Contributing to Backgen (`bcm`)
 
 ## Development Setup
 
 ```bash
-git clone https://github.com/your-org/backgen.git
+git clone https://github.com/Mahmoud-s-Khedr/backgen.git
 cd backgen
 npm install
 ```
@@ -42,15 +42,15 @@ src/
 
 ## Making Changes
 
-1. Create a feature branch from `main`
-2. Make your changes
-3. Run `npm run lint` and `npm test`
-4. Run `npm run build` and test generation with an example schema
-5. Submit a PR with a clear description
+1. Create a feature branch from `main`.
+2. Make your changes.
+3. Run `npm run lint` and `npm test`.
+4. Run `npm run build` and test generation with an example schema.
+5. Submit a PR with a clear description.
 
 ## Conventions
 
-- ESM imports throughout (`"type": "module"`)
-- Named imports for CJS packages when available
-- EJS templates receive `{ model, h: helpers, ... }` — helpers are in `template-engine.ts`
-- Generated code must have zero runtime dependency on the CLI
+- ESM imports throughout (`"type": "module"`).
+- Named imports for CJS packages when available.
+- EJS templates receive `{ model, h: helpers, ... }` — helpers are in `template-engine.ts`.
+- Generated code must have zero runtime dependency on the CLI.

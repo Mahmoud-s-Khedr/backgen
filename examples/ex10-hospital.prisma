@@ -1,6 +1,6 @@
 // Example 10: Hospital Management System
-// Complexity: Twelve models — real-world healthcare system
-// Demonstrates: all directives, enums, complex relations, @bcm.protected, @bcm.auth(roles), @bcm.softDelete, @bcm.searchable, @bcm.hidden, @bcm.writeOnly, @bcm.readonly, @bcm.nested
+// Complexity: Thirteen models — real-world healthcare system
+// Demonstrates: all directives, enums, complex relations, @bcm.authModel, @bcm.identifier, @bcm.password, @bcm.protected, @bcm.auth(roles), @bcm.softDelete, @bcm.searchable, @bcm.hidden, @bcm.writeOnly, @bcm.readonly, @bcm.nested
 
 datasource db {
   provider = "postgresql"
@@ -9,6 +9,16 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model StaffAccount {
+  id       String   @id @default(uuid())
+  /// @bcm.identifier
+  email    String   @unique
+  /// @bcm.password
+  password String
+  role     AuthRole @default(DOCTOR)
 }
 
 /// @bcm.protected
@@ -37,6 +47,8 @@ model Patient {
   createdAt       DateTime        @default(now())
   /// @bcm.readonly
   updatedAt       DateTime        @updatedAt
+
+  @@index([wardId])
 }
 
 /// @bcm.protected
@@ -57,6 +69,8 @@ model Doctor {
   prescriptions  Prescription[]
   /// @bcm.readonly
   createdAt      DateTime      @default(now())
+
+  @@index([departmentId])
 }
 
 model Nurse {
@@ -74,6 +88,9 @@ model Nurse {
   departmentId String
   /// @bcm.readonly
   createdAt    DateTime   @default(now())
+
+  @@index([wardId])
+  @@index([departmentId])
 }
 
 model Department {
@@ -101,6 +118,8 @@ model Ward {
   nurses       Nurse[]
   /// @bcm.readonly
   createdAt    DateTime   @default(now())
+
+  @@index([departmentId])
 }
 
 /// @bcm.protected
@@ -121,6 +140,9 @@ model Appointment {
   createdAt  DateTime          @default(now())
   /// @bcm.readonly
   updatedAt  DateTime          @updatedAt
+
+  @@index([patientId])
+  @@index([doctorId])
 }
 
 /// @bcm.auth(roles: [DOCTOR, ADMIN])
@@ -136,6 +158,9 @@ model MedicalRecord {
   treatment   String?
   /// @bcm.readonly
   createdAt   DateTime @default(now())
+
+  @@index([patientId])
+  @@index([doctorId])
 }
 
 /// @bcm.protected
@@ -159,6 +184,10 @@ model Prescription {
   /// @bcm.readonly
   updatedAt   DateTime           @updatedAt
   deletedAt   DateTime?
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([medicationId])
 }
 
 model Medication {
@@ -189,6 +218,8 @@ model LabResult {
   completedAt DateTime?
   /// @bcm.readonly
   createdAt   DateTime      @default(now())
+
+  @@index([patientId])
 }
 
 /// @bcm.protected
@@ -197,7 +228,7 @@ model Insurance {
   patient        Patient  @relation(fields: [patientId], references: [id])
   patientId      String   @unique
   provider       String
-  /// @bcm.hidden
+  /// @bcm.writeOnly
   policyNumber   String
   /// @bcm.hidden
   groupNumber    String?
@@ -224,6 +255,8 @@ model Billing {
   createdAt   DateTime      @default(now())
   /// @bcm.readonly
   updatedAt   DateTime      @updatedAt
+
+  @@index([patientId])
 }
 
 enum Gender {
@@ -231,6 +264,11 @@ enum Gender {
   FEMALE
   OTHER
   PREFER_NOT_TO_SAY
+}
+
+enum AuthRole {
+  ADMIN
+  DOCTOR
 }
 
 enum BloodType {

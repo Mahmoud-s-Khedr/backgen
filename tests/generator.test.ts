@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { generateProject } from '../src/generator/index.js';
 import { parsePrismaAst } from '../src/parser/prisma-ast-parser.js';
 import type { GenerateOptions, ParsedSchema } from '../src/parser/types.js';
@@ -41,6 +42,33 @@ model Post {
   authorId  String
   author    User      @relation(fields: [authorId], references: [id])
   deletedAt DateTime?
+}
+`;
+
+const COMPOSITE_KEYS_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Favorite {
+  userId    String
+  listingId String
+  createdAt DateTime @default(now())
+
+  @@id([userId, listingId])
+}
+
+model Membership {
+  orgId  String
+  userId String
+  scope  String
+
+  @@unique([orgId, scope])
 }
 `;
 
@@ -184,6 +212,18 @@ describe('generateProject', () => {
             expect(paths).toContain('/health');
         });
 
+        it('openapi.json uses selector-aware paths for composite keys', async () => {
+            const schema = parsePrismaAst(COMPOSITE_KEYS_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, COMPOSITE_KEYS_SCHEMA);
+            const openapi = JSON.parse(files[0].content);
+            const paths = Object.keys(openapi.paths);
+
+            expect(paths).toContain('/api/favorites/{userId}/{listingId}');
+            expect(paths).toContain('/api/memberships/{orgId}/{scope}');
+            expect(openapi.paths['/api/favorites/{userId}/{listingId}'].get.parameters[0].name).toBe('userId');
+            expect(openapi.paths['/api/favorites/{userId}/{listingId}'].get.parameters[1].name).toBe('listingId');
+        });
+
         it('openapi.json includes enum schemas', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, BLOG_SCHEMA);
@@ -191,6 +231,19 @@ describe('generateProject', () => {
 
             expect(openapi.components.schemas.Role).toBeDefined();
             expect(openapi.components.schemas.Role.enum).toEqual(['USER', 'ADMIN']);
+        });
+
+        it('openapi.json wraps single-item responses in data envelope', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, BLOG_SCHEMA);
+            const openapi = JSON.parse(files[0].content);
+
+            expect(openapi.components.schemas.UserDataResponse).toBeDefined();
+            expect(openapi.components.schemas.UserDataResponse.properties.data.$ref).toBe('#/components/schemas/UserResponse');
+            expect(openapi.paths['/api/users/{id}'].get.responses['200'].content['application/json'].schema.$ref)
+                .toBe('#/components/schemas/UserDataResponse');
+            expect(openapi.paths['/api/users'].post.responses['201'].content['application/json'].schema.$ref)
+                .toBe('#/components/schemas/UserDataResponse');
         });
 
         it('dto.ts includes writeOnly field in create schema but not response', async () => {
@@ -203,6 +256,76 @@ describe('generateProject', () => {
             // Look for the ResponseSchema section
             const responseSection = dtoFile.content.split('ResponseSchema')[1];
             expect(responseSection).not.toContain('password');
+        });
+
+        it('dto.ts includes include-aware response schema for relations', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
+            const postDto = files.find(f => f.path.includes('post.dto.ts'))!;
+
+            expect(postDto.content).toContain('PostWithIncludesResponseSchema');
+            expect(postDto.content).toContain('Post_AuthorRelationSchema');
+            expect(postDto.content).toContain('author: Post_AuthorRelationSchema');
+        });
+
+        it('dto.ts emits enum schema used by include relation response fields', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
+            const postDto = files.find(f => f.path.includes('post.dto.ts'))!;
+
+            expect(postDto.content).toContain('export const RoleSchema = z.enum');
+            expect(postDto.content).toContain('role: RoleSchema');
+        });
+
+        it('dto.ts emits all enum schemas needed by multiple include relation targets', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum TeamStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum OfficeType {
+  HQ
+  BRANCH
+}
+
+model Team {
+  id     String     @id @default(cuid())
+  status TeamStatus
+  hubs   Hub[]
+}
+
+model Office {
+  id   String     @id @default(cuid())
+  type OfficeType
+  hubs Hub[]
+}
+
+model Hub {
+  id       String @id @default(cuid())
+  teamId   String
+  officeId String
+  team     Team   @relation(fields: [teamId], references: [id])
+  office   Office @relation(fields: [officeId], references: [id])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, raw);
+            const hubDto = files.find(f => f.path.includes('hub.dto.ts'))!;
+
+            expect(hubDto.content).toContain('export const TeamStatusSchema = z.enum');
+            expect(hubDto.content).toContain('export const OfficeTypeSchema = z.enum');
+            expect(hubDto.content).toContain('status: TeamStatusSchema');
+            expect(hubDto.content).toContain('type: OfficeTypeSchema');
         });
 
         it('routes.ts imports authenticate middleware for protected models', async () => {
@@ -230,6 +353,78 @@ describe('generateProject', () => {
             expect(postService.content).toContain('deletedAt');
         });
 
+        it('service.ts uses findFirst for softDelete findOne', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
+            const postService = files.find(f => f.path.includes('post.service.ts'))!;
+
+            expect(postService.content).toContain('findFirst');
+            expect(postService.content).toContain('where: { ...this.toWhereUnique(key), deletedAt: null }');
+        });
+
+        it('service.ts uses findUnique for non-softDelete findOne', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
+            const userService = files.find(f => f.path.includes('user.service.ts'))!;
+
+            expect(userService.content).toContain('findUnique');
+            expect(userService.content).toContain('where: this.toWhereUnique(key)');
+        });
+
+        it('service.ts normalizes include objects without @ts-ignore', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
+            const userService = files.find(f => f.path.includes('user.service.ts'))!;
+            const postService = files.find(f => f.path.includes('post.service.ts'))!;
+
+            expect(userService.content).toContain('private toInclude(include?: Record<string, boolean>)');
+            expect(userService.content).toContain('...(include ? { include } : {}),');
+            expect(userService.content).not.toContain('@ts-ignore');
+            expect(postService.content).not.toContain('@ts-ignore');
+        });
+
+        it('generates composite-key routes and where selectors', async () => {
+            const schema = parsePrismaAst(COMPOSITE_KEYS_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, COMPOSITE_KEYS_SCHEMA);
+            const favoriteRoutes = files.find(f => f.path.includes('favorite.routes.ts'))!;
+            const favoriteService = files.find(f => f.path.includes('favorite.service.ts'))!;
+            const membershipRoutes = files.find(f => f.path.includes('membership.routes.ts'))!;
+
+            expect(favoriteRoutes.content).toContain("router.get('/:userId/:listingId'");
+            expect(favoriteService.content).toContain('userId_listingId');
+            expect(favoriteService.content).toContain('userId: key.userId');
+            expect(favoriteService.content).toContain('listingId: key.listingId');
+
+            // falls back to first available unique composite selector when no @id exists
+            expect(membershipRoutes.content).toContain("router.get('/:orgId/:scope'");
+        });
+
+        it('skips item routes when model has no unique selector', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model EventLog {
+  message String
+  createdAt DateTime @default(now())
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, raw);
+            const routes = files.find(f => f.path.includes('eventLog.routes.ts'))!;
+            const controller = files.find(f => f.path.includes('eventLog.controller.ts'))!;
+
+            expect(routes.content).not.toContain("router.get('/:id'");
+            expect(routes.content).not.toContain('router.put(');
+            expect(controller.content).not.toContain('getOne(');
+        });
+
         it('controller.ts includes ALLOWED_FILTER_FIELDS', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
@@ -247,6 +442,28 @@ describe('generateProject', () => {
             expect(controller.content).toContain("'title'");
         });
 
+        it('controller.ts validates include relations and parses include-aware responses', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
+            const controller = files.find(f => f.path.includes('post.controller.ts'))!;
+
+            expect(controller.content).toContain('ALLOWED_INCLUDE_RELATIONS');
+            expect(controller.content).toContain('WithIncludesResponseSchema');
+            expect(controller.content).toContain('buildQueryOptions(req.query, {');
+            expect(controller.content).toContain('allowedIncludeRelations: ALLOWED_INCLUDE_RELATIONS');
+            expect(controller.content).toContain('defaultSortField: DEFAULT_SORT_FIELD');
+        });
+
+        it('query-builder validates unknown include relations with 422', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'utils' }, BLOG_SCHEMA);
+            const queryBuilder = files.find(f => f.path.includes('query-builder.ts'))!;
+
+            expect(queryBuilder.content).toContain("import { ProblemDetail }");
+            expect(queryBuilder.content).toContain('Unknown include relation(s)');
+            expect(queryBuilder.content).toContain('status: 422');
+        });
+
         it('package.json includes correct dependencies', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, BLOG_SCHEMA);
@@ -258,6 +475,7 @@ describe('generateProject', () => {
             expect(pkg.dependencies).toHaveProperty('zod');
             expect(pkg.dependencies).toHaveProperty('pino');
             expect(pkg.dependencies).toHaveProperty('compression');
+            expect(pkg.dependencies).toHaveProperty('bcryptjs');
             expect(pkg.devDependencies).toHaveProperty('@faker-js/faker');
         });
 
@@ -318,6 +536,16 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id String @id @default(cuid())
+  /// @bcm.identifier
+  email String @unique
+  /// @bcm.password
+  password String
+  role String @default("ADMIN")
 }
 
 /// @bcm.auth(roles: [ADMIN])
@@ -400,6 +628,569 @@ model Post {
             expect(openapi.components.securitySchemes).toBeDefined();
             expect(openapi.components.securitySchemes.bearerAuth.type).toBe('http');
             expect(openapi.components.securitySchemes.bearerAuth.scheme).toBe('bearer');
+        });
+
+        it('auth route includes bcrypt password verification and role claim in JWT', async () => {
+            const schema = getAuthSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'app' }, AUTH_SCHEMA);
+            const authRoutes = files.find(f => f.path === 'src/modules/auth/auth.routes.ts')!;
+
+            expect(authRoutes.content).toContain("import bcrypt from 'bcryptjs'");
+            expect(authRoutes.content).toContain('await bcrypt.compare');
+            expect(authRoutes.content).toContain('role: user.role');
+        });
+
+        it('auth route uses strict identifier type and avoids duplicate id claim when identifier is id', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  /// @bcm.identifier
+  id       Int    @id @default(autoincrement())
+  /// @bcm.password
+  password String
+  role     String
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model Settings {
+  id String @id @default(cuid())
+  key String @unique
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'app' }, raw);
+            const authRoutes = files.find(f => f.path === 'src/modules/auth/auth.routes.ts')!;
+
+            expect(authRoutes.content).toContain('id: z.number().int()');
+            const idClaims = authRoutes.content.match(/\bid:\s*user\.id\b/g) ?? [];
+            expect(idClaims).toHaveLength(1);
+        });
+
+        it('auth model service hashes passwords on create/update', async () => {
+            const schema = getAuthSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, AUTH_SCHEMA);
+            const userService = files.find(f => f.path === 'src/modules/user/user.service.ts')!;
+
+            expect(userService.content).toContain("import bcrypt from 'bcryptjs'");
+            expect(userService.content).toContain('await bcrypt.hash');
+            expect(userService.content).toContain('createData.password');
+            expect(userService.content).toContain('updateData.password');
+        });
+    });
+
+    describe('RBAC auth model validation', () => {
+        it('throws when @bcm.auth is used without @bcm.authModel', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model Settings {
+  id String @id @default(cuid())
+  key String @unique
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('RBAC requires an auth model');
+        });
+
+        it('throws when auth model is missing scalar role field', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id String @id @default(cuid())
+  /// @bcm.identifier
+  email String @unique
+  /// @bcm.password
+  password String
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model Settings {
+  id String @id @default(cuid())
+  key String @unique
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('is incomplete for RBAC');
+        });
+
+        it('throws when @bcm.identifier field is not unique', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id String @id @default(cuid())
+  /// @bcm.identifier
+  email String
+  /// @bcm.password
+  password String
+  role String
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model Settings {
+  id String @id @default(cuid())
+  key String @unique
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('@bcm.identifier field "email" must be unique');
+        });
+
+        it('allows @bcm.identifier when it is @id', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  /// @bcm.identifier
+  id String @id @default(cuid())
+  /// @bcm.password
+  password String
+  role String
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model Settings {
+  id String @id @default(cuid())
+  key String @unique
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, { ...defaultOptions, only: 'app' }, raw)).resolves.toBeDefined();
+        });
+    });
+
+    describe('hidden required FK validation', () => {
+        it('throws when required hidden FK has no nested relation input path', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id String @id @default(cuid())
+  posts Post[]
+}
+
+model Post {
+  id String @id @default(cuid())
+  /// @bcm.hidden
+  ownerId String
+  owner User @relation(fields: [ownerId], references: [id])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('Invalid schema for API generation');
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('Model "Post" relation "owner" uses hidden required FK field "ownerId"');
+        });
+
+        it('allows required hidden FK when relation uses @bcm.nested', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id String @id @default(cuid())
+  posts Post[]
+}
+
+model Post {
+  id String @id @default(cuid())
+  /// @bcm.hidden
+  ownerId String
+  /// @bcm.nested
+  owner User @relation(fields: [ownerId], references: [id])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, { ...defaultOptions, only: 'routes' }, raw)).resolves.toBeDefined();
+        });
+
+        it('allows optional hidden FK without @bcm.nested', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id String @id @default(cuid())
+  posts Post[]
+}
+
+model Post {
+  id String @id @default(cuid())
+  /// @bcm.hidden
+  ownerId String?
+  owner User? @relation(fields: [ownerId], references: [id])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, { ...defaultOptions, only: 'routes' }, raw)).resolves.toBeDefined();
+        });
+
+        it('throws when composite required hidden FK has no nested relation input path', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Locale {
+  code   String
+  region String
+  books  Book[]
+
+  @@id([code, region], name: "localeKey")
+}
+
+model Book {
+  id           String @id @default(cuid())
+  /// @bcm.hidden
+  localeCode   String
+  /// @bcm.hidden
+  localeRegion String
+  locale       Locale @relation(fields: [localeCode, localeRegion], references: [code, region])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('Invalid schema for API generation');
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('Model "Book" relation "locale" uses hidden required FK field "localeCode"');
+        });
+
+        it('allows composite required hidden FK when relation uses @bcm.nested', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Locale {
+  code   String
+  region String
+  books  Book[]
+
+  @@id([code, region], name: "localeKey")
+}
+
+model Book {
+  id           String @id @default(cuid())
+  /// @bcm.hidden
+  localeCode   String
+  /// @bcm.hidden
+  localeRegion String
+  /// @bcm.nested
+  locale       Locale @relation(fields: [localeCode, localeRegion], references: [code, region])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, { ...defaultOptions, only: 'routes' }, raw)).resolves.toBeDefined();
+        });
+    });
+
+    describe('schema validation safety guards', () => {
+        it('throws when @bcm.softDelete model is missing deletedAt DateTime?', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.softDelete
+model Post {
+  id String @id @default(cuid())
+  title String
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('uses @bcm.softDelete but is missing field "deletedAt"');
+        });
+
+        it('throws when @bcm.softDelete deletedAt field has the wrong shape', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.softDelete
+model Post {
+  id String @id @default(cuid())
+  deletedAt DateTime
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('field "deletedAt" is invalid for @bcm.softDelete');
+        });
+
+        it('allows valid @bcm.softDelete deletedAt DateTime? field', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.softDelete
+model Post {
+  id String @id @default(cuid())
+  deletedAt DateTime?
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, { ...defaultOptions, only: 'routes' }, raw)).resolves.toBeDefined();
+        });
+
+        it('throws when a required scalar field is marked @bcm.readonly without optional/default', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id String @id @default(cuid())
+  notifications Notification[]
+}
+
+model Notification {
+  id String @id @default(cuid())
+  userId String
+  /// @bcm.nested
+  user User @relation(fields: [userId], references: [id])
+  /// @bcm.readonly
+  type String
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('Invalid schema for API generation');
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('Model "Notification" field "type" is required and marked @bcm.readonly');
+        });
+
+        it('allows required @bcm.readonly scalar fields when a default value exists', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id String @id @default(cuid())
+  notifications Notification[]
+}
+
+model Notification {
+  id String @id @default(cuid())
+  userId String
+  /// @bcm.nested
+  user User @relation(fields: [userId], references: [id])
+  /// @bcm.readonly
+  type String @default("system")
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, { ...defaultOptions, only: 'routes' }, raw)).resolves.toBeDefined();
+        });
+
+        it('throws when required relations mix @bcm.nested and scalar-FK input modes', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id String @id @default(cuid())
+  participants ConversationParticipant[]
+}
+
+model Conversation {
+  id String @id @default(cuid())
+  participants ConversationParticipant[]
+}
+
+model ConversationParticipant {
+  id String @id @default(cuid())
+  conversationId String
+  userId String
+  /// @bcm.nested
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('Invalid schema for API generation');
+            await expect(generateProject(schema, defaultOptions, raw)).rejects.toThrow('Model "ConversationParticipant" mixes required @bcm.nested relations');
+        });
+
+        it('allows models where all required relations use @bcm.nested', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id String @id @default(cuid())
+  participants ConversationParticipant[]
+}
+
+model Conversation {
+  id String @id @default(cuid())
+  participants ConversationParticipant[]
+}
+
+model ConversationParticipant {
+  id String @id @default(cuid())
+  conversationId String
+  userId String
+  /// @bcm.nested
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  /// @bcm.nested
+  user User @relation(fields: [userId], references: [id])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, { ...defaultOptions, only: 'routes' }, raw)).resolves.toBeDefined();
+        });
+
+        it('accepts ex12-style ConversationParticipant shape once both required relations are nested', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id String @id @default(cuid())
+  conversationParticipants ConversationParticipant[]
+}
+
+model Conversation {
+  id String @id @default(cuid())
+  participants ConversationParticipant[]
+}
+
+/// @bcm.protected
+model ConversationParticipant {
+  id             String @id @default(cuid())
+  conversationId String
+  userId         String
+
+  /// @bcm.nested
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// @bcm.nested
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, { ...defaultOptions, only: 'routes' }, raw)).resolves.toBeDefined();
+        });
+
+        it('accepts examples/ex12-4swapp.prisma under strict validation guards', async () => {
+            const raw = readFileSync('examples/ex12-4swapp.prisma', 'utf8');
+            const schema = parsePrismaAst(raw);
+            await expect(generateProject(schema, { ...defaultOptions, only: 'routes' }, raw)).resolves.toBeDefined();
         });
     });
 
@@ -528,6 +1319,37 @@ model Post {
             return parsePrismaAst(NESTED_SCHEMA);
         }
 
+        const NESTED_ENUM_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+model User {
+  id     String @id @default(cuid())
+  email  String @unique
+  gender Gender
+  posts  Post[]
+}
+
+model Post {
+  id       String @id @default(cuid())
+  title    String
+  authorId String
+  /// @bcm.nested
+  author   User   @relation(fields: [authorId], references: [id])
+}
+`;
+
         it('dto.ts includes nested input schema for @bcm.nested relations', async () => {
             const schema = getNestedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, NESTED_SCHEMA);
@@ -550,6 +1372,15 @@ model Post {
             expect(createSection).toContain('author');
         });
 
+        it('dto.ts requires nested relation when underlying FK is required', async () => {
+            const schema = getNestedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, NESTED_SCHEMA);
+            const postDto = files.find(f => f.path.includes('post.dto.ts'))!;
+
+            expect(postDto.content).toContain('author: Post_AuthorInput,');
+            expect(postDto.content).not.toContain('author: Post_AuthorInput.optional()');
+        });
+
         it('service.ts auto-includes nested relations in create', async () => {
             const schema = getNestedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, NESTED_SCHEMA);
@@ -557,6 +1388,18 @@ model Post {
 
             expect(postService.content).toContain('include:');
             expect(postService.content).toContain('author: true');
+        });
+
+        it('test.ts payload uses nested connect for required @bcm.nested relations', async () => {
+            const schema = getNestedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, NESTED_SCHEMA);
+            const postTest = files.find(f => f.path.includes('post.test.ts'))!;
+
+            expect(postTest.content).toContain("vi.mock('../../config/database.js'");
+            expect(postTest.content).toContain('const prismaMock');
+            expect(postTest.content).toContain('returns a paginated list from mocked Prisma delegates');
+            expect(postTest.content).toContain('returns 404 when mocked Prisma reports a missing record');
+            expect(postTest.content).not.toContain('TODO: Set up test database');
         });
 
         it('user dto.ts does not include nested input (no @bcm.nested on User)', async () => {
@@ -576,6 +1419,475 @@ model Post {
             expect(openapi.components.schemas['Post_AuthorInput']).toBeDefined();
             expect(openapi.components.schemas['Post_AuthorInput'].properties.create).toBeDefined();
             expect(openapi.components.schemas['Post_AuthorInput'].properties.connect).toBeDefined();
+        });
+
+        it('openapi update/patch schemas include nested relation input and exclude nested FK', async () => {
+            const schema = getNestedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, NESTED_SCHEMA);
+            const openapi = JSON.parse(files[0].content);
+
+            const createProps = openapi.components.schemas.PostCreate.properties;
+            const updateProps = openapi.components.schemas.PostUpdate.properties;
+            const patchProps = openapi.components.schemas.PostPatch.properties;
+            expect(createProps.author).toBeDefined();
+            expect(updateProps.author).toBeDefined();
+            expect(patchProps.author).toBeDefined();
+            expect(createProps.authorId).toBeUndefined();
+            expect(updateProps.authorId).toBeUndefined();
+            expect(patchProps.authorId).toBeUndefined();
+        });
+
+        it('dto.ts emits enum schema used only by nested relation create fields', async () => {
+            const schema = parsePrismaAst(NESTED_ENUM_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, NESTED_ENUM_SCHEMA);
+            const postDto = files.find(f => f.path.includes('post.dto.ts'))!;
+
+            expect(postDto.content).toContain('export const GenderSchema = z.enum');
+            expect(postDto.content).toContain('gender: GenderSchema');
+        });
+    });
+
+    describe('test scaffolding for models with no required create fields', () => {
+        const OPTIONAL_ONLY_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.protected
+model Conversation {
+  id        String   @id @default(uuid())
+  title     String?
+  createdAt DateTime @default(now())
+}
+`;
+
+        it('does not assert 422 for empty POST/PUT bodies when no required fields exist', async () => {
+            const schema = parsePrismaAst(OPTIONAL_ONLY_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, OPTIONAL_ONLY_SCHEMA);
+            const convoTest = files.find(f => f.path.includes('conversation.test.ts'))!;
+
+            expect(convoTest.content).toContain('accepts an empty body when the schema has no required create fields');
+            expect(convoTest.content).not.toContain('returns 422 for an invalid body before hitting Prisma');
+        });
+
+        it('asserts 422 for empty POST/PUT bodies when required nested relation input exists', async () => {
+            const nestedRequiredOnlySchema = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id String @id @default(cuid())
+  notes Note[]
+}
+
+model Note {
+  id String @id @default(cuid())
+  ownerId String
+  /// @bcm.nested
+  owner User @relation(fields: [ownerId], references: [id])
+  content String?
+}
+`;
+            const schema = parsePrismaAst(nestedRequiredOnlySchema);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, nestedRequiredOnlySchema);
+            const noteTest = files.find(f => f.path.includes('note.test.ts'))!;
+
+            expect(noteTest.content).toContain('returns 422 for an invalid body before hitting Prisma');
+            expect(noteTest.content).not.toContain('accepts an empty body when the schema has no required create fields');
+        });
+    });
+
+    describe('typed selectors and query safety', () => {
+        it('generates typed selector keys and selector param coercion for non-string selectors', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Invoice {
+  id   Int    @id @default(autoincrement())
+  code String @unique
+}
+
+model Shipment {
+  day      DateTime
+  sequence Int
+
+  @@id([day, sequence])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, raw);
+
+            const invoiceService = files.find(f => f.path.includes('invoice.service.ts'))!;
+            const invoiceController = files.find(f => f.path.includes('invoice.controller.ts'))!;
+            const shipmentService = files.find(f => f.path.includes('shipment.service.ts'))!;
+            const shipmentController = files.find(f => f.path.includes('shipment.controller.ts'))!;
+
+            expect(invoiceService.content).toContain('id: number;');
+            expect(invoiceController.content).toContain("fieldType === 'number'");
+            expect(shipmentService.content).toContain('day: Date;');
+            expect(shipmentService.content).toContain('sequence: number;');
+            expect(shipmentController.content).toContain("fieldType === 'datetime'");
+        });
+
+        it('uses model-derived default sort instead of hardcoded id fallback', async () => {
+            const schema = parsePrismaAst(COMPOSITE_KEYS_SCHEMA);
+            const routeFiles = await generateProject(schema, { ...defaultOptions, only: 'routes' }, COMPOSITE_KEYS_SCHEMA);
+            const utilFiles = await generateProject(schema, { ...defaultOptions, only: 'utils' }, COMPOSITE_KEYS_SCHEMA);
+
+            const favoriteController = routeFiles.find(f => f.path.includes('favorite.controller.ts'))!;
+            const queryBuilder = utilFiles.find(f => f.path.includes('query-builder.ts'))!;
+
+            expect(favoriteController.content).toContain("const DEFAULT_SORT_FIELD: string | undefined = 'userId'");
+            expect(queryBuilder.content).not.toContain("query.sort || 'id'");
+            expect(queryBuilder.content).toContain("let sortField: string | undefined;");
+        });
+
+        it('emits filter type metadata and strict filter coercion logic', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Status {
+  OPEN
+  CLOSED
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  status    Status
+  amount    BigInt
+  createdAt DateTime
+  title     String
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const routeFiles = await generateProject(schema, { ...defaultOptions, only: 'routes' }, raw);
+            const utilFiles = await generateProject(schema, { ...defaultOptions, only: 'utils' }, raw);
+
+            const controller = routeFiles.find(f => f.path.includes('auditLog.controller.ts'))!;
+            const queryBuilder = utilFiles.find(f => f.path.includes('query-builder.ts'))!;
+
+            expect(controller.content).toContain("status: 'enum'");
+            expect(controller.content).toContain("amount: 'bigint'");
+            expect(controller.content).toContain("createdAt: 'datetime'");
+            expect(queryBuilder.content).toContain("if (fieldType === 'enum')");
+            expect(queryBuilder.content).toContain("if (fieldType === 'bigint')");
+            expect(queryBuilder.content).toContain("if (fieldType === 'datetime')");
+            expect(queryBuilder.content).toContain('Invalid filter value for');
+        });
+
+        it('rejects include params when model has no includable relations', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model EventLog {
+  id      String @id @default(cuid())
+  message String
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const routeFiles = await generateProject(schema, { ...defaultOptions, only: 'routes' }, raw);
+            const utilFiles = await generateProject(schema, { ...defaultOptions, only: 'utils' }, raw);
+
+            const controller = routeFiles.find(f => f.path.includes('eventLog.controller.ts'))!;
+            const queryBuilder = utilFiles.find(f => f.path.includes('query-builder.ts'))!;
+
+            expect(controller.content).toContain('const ALLOWED_INCLUDE_RELATIONS: string[] = [];');
+            expect(queryBuilder.content).toContain('relations.filter(');
+            expect(queryBuilder.content).toContain('!allowedIncludeRelations.includes(relation)');
+            expect(queryBuilder.content).not.toContain('allowedIncludeRelations.length > 0');
+        });
+    });
+
+    describe('nested connect selector support', () => {
+        const NESTED_SELECTOR_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Category {
+  id    Int    @id @default(autoincrement())
+  name  String
+  posts Post[]
+}
+
+model Locale {
+  code   String
+  region String
+  books  Book[]
+
+  @@id([code, region], name: "localeKey")
+}
+
+model Post {
+  id         String   @id @default(cuid())
+  title      String
+  categoryId Int
+  /// @bcm.nested
+  category   Category @relation(fields: [categoryId], references: [id])
+}
+
+model Book {
+  id           String @id @default(cuid())
+  title        String
+  localeCode   String
+  localeRegion String
+  /// @bcm.nested
+  locale       Locale @relation(fields: [localeCode, localeRegion], references: [code, region])
+}
+`;
+
+        it('generates dto connect schema using selector field types for single and composite selectors', async () => {
+            const schema = parsePrismaAst(NESTED_SELECTOR_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, NESTED_SELECTOR_SCHEMA);
+            const postDto = files.find(f => f.path.includes('post.dto.ts'))!;
+            const bookDto = files.find(f => f.path.includes('book.dto.ts'))!;
+
+            expect(postDto.content).toContain('connect: z.object({');
+            expect(postDto.content).toContain('id: z.number().int()');
+            expect(bookDto.content).toContain('localeKey: z.object({');
+            expect(bookDto.content).toContain('code: z.string()');
+            expect(bookDto.content).toContain('region: z.string()');
+        });
+
+        it('generates matching OpenAPI connect schema for selector-aware nested inputs', async () => {
+            const schema = parsePrismaAst(NESTED_SELECTOR_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, NESTED_SELECTOR_SCHEMA);
+            const openapi = JSON.parse(files[0].content);
+
+            const postConnect = openapi.components.schemas['Post_CategoryInput'].properties.connect;
+            const bookConnect = openapi.components.schemas['Book_LocaleInput'].properties.connect;
+            expect(postConnect.properties.id.type).toBe('integer');
+            expect(bookConnect.properties.localeKey).toBeDefined();
+            expect(bookConnect.properties.localeKey.properties.code.type).toBe('string');
+            expect(bookConnect.properties.localeKey.properties.region.type).toBe('string');
+        });
+
+        it('generates selector-aware composite nested connect payload in scaffold tests', async () => {
+            const schema = parsePrismaAst(NESTED_SELECTOR_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, NESTED_SELECTOR_SCHEMA);
+            const bookTest = files.find(f => f.path.includes('book.test.ts'))!;
+
+            expect(bookTest.content).toContain('const prismaMock');
+            expect(bookTest.content).toContain('mockRecord(existingKey)');
+            expect(bookTest.content).toContain('buildItemPath');
+        });
+    });
+
+    describe('list @bcm.nested relation handling', () => {
+        const LIST_NESTED_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id          String @id @default(cuid())
+  displayName String
+  /// @bcm.nested
+  posts       Post[]
+}
+
+model Post {
+  id      String @id @default(cuid())
+  title   String
+  ownerId String?
+  owner   User?  @relation(fields: [ownerId], references: [id])
+}
+`;
+
+        it('dto.ts emits array create and connect schemas for list nested relations', async () => {
+            const schema = parsePrismaAst(LIST_NESTED_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, LIST_NESTED_SCHEMA);
+            const userDto = files.find(f => f.path.includes('user.dto.ts'))!;
+
+            expect(userDto.content).toContain('User_PostsInput');
+            expect(userDto.content).toContain('create: z.array(z.object({');
+            expect(userDto.content).toContain('connect: z.array(z.object({');
+            expect(userDto.content).toContain(')).min(1).optional()');
+            expect(userDto.content).toContain('displayName: z.string(),');
+        });
+
+        it('openapi.json matches array create/connect contract for list nested relations', async () => {
+            const schema = parsePrismaAst(LIST_NESTED_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, LIST_NESTED_SCHEMA);
+            const openapi = JSON.parse(files[0].content);
+            const nestedInput = openapi.components.schemas['User_PostsInput'];
+
+            expect(nestedInput.properties.create.type).toBe('array');
+            expect(nestedInput.properties.create.items.type).toBe('object');
+            expect(nestedInput.properties.connect.type).toBe('array');
+            expect(nestedInput.properties.connect.items.type).toBe('object');
+            expect(nestedInput.anyOf).toEqual([{ required: ['create'] }, { required: ['connect'] }]);
+        });
+
+        it('keeps unrelated scalar fields in create schema for list nested relations', async () => {
+            const schema = parsePrismaAst(LIST_NESTED_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, LIST_NESTED_SCHEMA);
+            const openapi = JSON.parse(files[0].content);
+
+            expect(openapi.components.schemas.UserCreate.properties.displayName).toBeDefined();
+            expect(openapi.components.schemas.UserCreate.properties.posts).toBeDefined();
+        });
+    });
+
+    describe('seed typing and infra config', () => {
+        it('seed template supports non-string parent IDs', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id    Int    @id @default(autoincrement())
+  name  String
+  posts Post[]
+}
+
+model Post {
+  id      Int    @id @default(autoincrement())
+  userId  Int
+  title   String
+  user    User   @relation(fields: [userId], references: [id])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'prisma' }, raw);
+            const seed = files.find(f => f.path === 'prisma/seed.ts')!;
+
+            expect(seed.content).toContain('type ParentId = string | number | bigint | Date;');
+            expect(seed.content).not.toContain('Record<string, string[]>');
+        });
+
+        it('emits wildcard-safe CORS credentials behavior and sqlite data path aligned with schema-relative resolution', async () => {
+            const sqliteSchema = `
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Item {
+  id   String @id @default(cuid())
+  name String
+}
+`;
+            const schema = parsePrismaAst(sqliteSchema);
+            const configFiles = await generateProject(schema, { ...defaultOptions, only: 'config' }, sqliteSchema);
+            const infraFiles = await generateProject(schema, { ...defaultOptions, only: 'infra' }, sqliteSchema);
+            const corsFile = configFiles.find(f => f.path === 'src/config/cors.ts')!;
+            const envExample = infraFiles.find(f => f.path === '.env.example')!;
+            const dc = infraFiles.find(f => f.path === 'docker-compose.yml')!;
+
+            expect(corsFile.content).toContain("const credentials = origin !== '*' && origin !== false;");
+            expect(corsFile.content).toContain('credentials,');
+            expect(envExample.content).toContain('Use an explicit origin when sending credentials from browsers');
+            expect(dc.content).toContain('DATABASE_URL=file:./data/');
+        });
+    });
+
+    describe('test scaffold auth dependency tokens', () => {
+        it('uses the shared mocked Prisma scaffold even for mixed RBAC dependency graphs', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id String @id @default(cuid())
+  /// @bcm.identifier
+  email String @unique
+  /// @bcm.password
+  password String
+  role String @default("ADMIN")
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model Org {
+  id   String @id @default(cuid())
+  name String
+  projects Project[]
+}
+
+/// @bcm.auth(roles: [MODERATOR])
+model Project {
+  id    String @id @default(cuid())
+  orgId String
+  title String
+  org   Org    @relation(fields: [orgId], references: [id])
+  tasks Task[]
+}
+
+model Task {
+  id        String  @id @default(cuid())
+  projectId String
+  title     String
+  project   Project @relation(fields: [projectId], references: [id])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, raw);
+            const taskTest = files.find(f => f.path.includes('task.test.ts'))!;
+
+            expect(taskTest.content).toContain('const prismaMock');
+            expect(taskTest.content).toContain("vi.mock('../../config/database.js'");
+            expect(taskTest.content).not.toContain('SetupToken');
+            expect(taskTest.content).not.toContain("role: 'ADMIN'");
+            expect(taskTest.content).not.toContain("role: 'MODERATOR'");
         });
     });
 });

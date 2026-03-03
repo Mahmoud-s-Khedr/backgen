@@ -35,4 +35,6 @@ model Post {
   authorId  String
   /// @bcm.readonly
   createdAt DateTime @default(now())
+
+  @@index([authorId])
 }

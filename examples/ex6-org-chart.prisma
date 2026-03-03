@@ -35,6 +35,9 @@ model Employee {
   projects     Project[]
   /// @bcm.readonly
   hiredAt      DateTime   @default(now())
+
+  @@index([departmentId])
+  @@index([managerId])
 }
 
 model Project {
@@ -49,4 +52,7 @@ model Project {
   leadId       String
   /// @bcm.readonly
   createdAt    DateTime   @default(now())
+
+  @@index([departmentId])
+  @@index([leadId])
 }

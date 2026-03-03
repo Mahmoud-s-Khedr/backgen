@@ -8,14 +8,17 @@
     "bcm": "./dist/generator/cli.js"
   },
   "scripts": {
-    "build": "esbuild src/cli.ts --bundle --platform=node --target=node18 --outfile=dist/generator/cli.js --format=esm --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\" && rm -rf dist/templates && cp -r src/templates dist/templates && cp package.json dist/package.json",
+    "build": "node scripts/build.mjs",
     "dev": "npm run build && node dist/generator/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "tsc --noEmit",
     "examples": "node scripts/run-examples.js",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "portfolio:shots": "node scripts/capture-playground-screenshots.mjs && node scripts/capture-cli-proof.mjs",
+    "portfolio:screenshots": "node scripts/capture-playground-screenshots.mjs",
+    "portfolio:cli-proof": "node scripts/capture-cli-proof.mjs"
   },
   "keywords": [
     "prisma",
@@ -27,7 +30,7 @@
     "scaffold",
     "crud"
   ],
-  "author": "",
+  "author": "Mahmoud Khedr",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
@@ -53,5 +56,13 @@
     "esbuild": "^0.27.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mahmoud-s-Khedr/backgen.git"
+  },
+  "homepage": "https://github.com/Mahmoud-s-Khedr/backgen",
+  "bugs": {
+    "url": "https://github.com/Mahmoud-s-Khedr/backgen/issues"
   }
 }

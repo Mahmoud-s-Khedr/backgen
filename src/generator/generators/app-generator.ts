@@ -19,6 +19,7 @@ export function generateAppFiles(schema: ParsedSchema): GeneratedFile[] {
         authModelLower,
         identifierField: authModel?.identifierField,
         passwordField: authModel?.passwordField,
+        roleField: authModel?.roleField,
     };
 
     const files: GeneratedFile[] = [
@@ -40,6 +41,7 @@ export function generateAppFiles(schema: ParsedSchema): GeneratedFile[] {
                 authModelLower,
                 identifierField: authModel.identifierField,
                 passwordField: authModel.passwordField,
+                roleField: authModel.roleField,
             }),
         });
     }

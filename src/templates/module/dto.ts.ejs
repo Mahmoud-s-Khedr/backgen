@@ -4,9 +4,40 @@ import { z } from 'zod';
  * <%= model.name %> DTOs (Data Transfer Objects)
  * Zod schemas for request validation and response shaping.
  */
+<%
+const requiredEnumNames = new Set(
+  model.fields
+    .filter(f => !f.isRelation)
+    .map(f => f.type)
+    .filter(type => enums.some(e => e.name === type))
+);
+for (const nr of nestedRelations) {
+  const targetModel = allModels.find(m => m.name === nr.relationModel);
+  if (!targetModel) continue;
+  const targetCreateFields = targetModel.fields.filter(
+    f => !f.isRelation && !f.isId && !f.directives.includes('hidden') && !f.directives.includes('readonly') && (!f.isServerDefault || f.directives.includes('writeOnly'))
+  );
+  for (const f of targetCreateFields) {
+    if (enums.some(e => e.name === f.type)) {
+      requiredEnumNames.add(f.type);
+    }
+  }
+}
+for (const relation of includeRelations) {
+  const targetModel = allModels.find(m => m.name === relation.relationModel);
+  if (!targetModel) continue;
+  const targetResponseFields = targetModel.fields.filter(
+    f => !f.isRelation && !f.directives.includes('hidden') && !f.directives.includes('writeOnly')
+  );
+  for (const f of targetResponseFields) {
+    if (enums.some(e => e.name === f.type)) {
+      requiredEnumNames.add(f.type);
+    }
+  }
+}
+-%>
 <% for (const enumDef of enums) { -%>
-<% const usedByModel = model.fields.some(f => f.type === enumDef.name); -%>
-<% if (usedByModel) { -%>
+<% if (requiredEnumNames.has(enumDef.name)) { -%>
 
 export const <%= enumDef.name %>Schema = z.enum([<%= enumDef.values.map(v => `'${v}'`).join(', ') %>]);
 <% } -%>
@@ -16,21 +47,45 @@ export const <%= enumDef.name %>Schema = z.enum([<%= enumDef.values.map(v => `'$
 <% const targetModel = allModels.find(m => m.name === nr.relationModel); -%>
 <% if (targetModel) { -%>
 <% const targetCreateFields = targetModel.fields.filter(f => !f.isRelation && !f.isId && !f.directives.includes('hidden') && !f.directives.includes('readonly') && (!f.isServerDefault || f.directives.includes('writeOnly'))); -%>
+<% const connectMeta = nestedRelationConnectMeta[nr.name]; -%>
 /**
  * Nested input for <%= nr.name %> relation on <%= model.name %>.
- * Supports Prisma's nested create or connect syntax.
+ * Supports Prisma's nested create syntax<%= connectMeta && connectMeta.hasConnect ? ' or selector-aware connect syntax' : '' %>.
  */
+<% if (connectMeta && connectMeta.hasConnect && connectMeta.selector) { -%>
 export const <%= model.name %>_<%= h.toPascalCase(nr.name) %>Input = z.object({
-  create: z.object({
+  create: <%= nr.isList ? 'z.array(' : '' %>z.object({
 <% for (const f of targetCreateFields) { -%>
 <% const ed = enums.find(e => e.name === f.type); const zt = ed ? `${ed.name}Schema` : h.prismaToZodType(f.type); const io = f.isOptional || f.hasDefault; -%>
     <%= f.name %>: <%= zt %><%= io ? '.optional()' : '' %>,
 <% } -%>
-  }).optional(),
-  connect: z.object({ id: z.string() }).optional(),
+  })<%= nr.isList ? ').min(1)' : '' %>.optional(),
+  connect: <%= nr.isList ? 'z.array(' : '' %>z.object({
+<% if (connectMeta.selector.isComposite) { -%>
+    <%= connectMeta.selector.prismaWhereKey || connectMeta.selector.fields.map((f) => f.name).join('_') %>: z.object({
+<% for (const selectorField of connectMeta.selector.fields) { -%>
+<% const sf = targetModel.fields.find(f => f.name === selectorField.name); const enumDef = sf ? enums.find(e => e.name === sf.type) : undefined; const zodType = sf ? (enumDef ? `${enumDef.name}Schema` : h.prismaToZodType(sf.type)) : 'z.string()'; -%>
+      <%= selectorField.name %>: <%= zodType %>,
+<% } -%>
+    }),
+<% } else { -%>
+<% const selectorField = connectMeta.selector.fields[0]; const sf = targetModel.fields.find(f => f.name === selectorField.name); const enumDef = sf ? enums.find(e => e.name === sf.type) : undefined; const zodType = sf ? (enumDef ? `${enumDef.name}Schema` : h.prismaToZodType(sf.type)) : 'z.string()'; -%>
+    <%= selectorField.name %>: <%= zodType %>,
+<% } -%>
+  })<%= nr.isList ? ').min(1)' : '' %>.optional(),
 }).refine(data => data.create || data.connect, {
   message: 'Either create or connect must be provided',
 });
+<% } else { -%>
+export const <%= model.name %>_<%= h.toPascalCase(nr.name) %>Input = z.object({
+  create: <%= nr.isList ? 'z.array(' : '' %>z.object({
+<% for (const f of targetCreateFields) { -%>
+<% const ed = enums.find(e => e.name === f.type); const zt = ed ? `${ed.name}Schema` : h.prismaToZodType(f.type); const io = f.isOptional || f.hasDefault; -%>
+    <%= f.name %>: <%= zt %><%= io ? '.optional()' : '' %>,
+<% } -%>
+  })<%= nr.isList ? ').min(1)' : '' %>,
+});
+<% } -%>
 <% } -%>
 <% } -%>
 
@@ -50,7 +105,12 @@ export const Create<%= model.name %>Schema = z.object({
   <%= field.name %>: <%= zodType %><%= isOpt ? '.optional()' : '' %>,<%= field.isUnique ? ' // Must be unique' : '' %>
 <% } -%>
 <% for (const nr of nestedRelations) { -%>
-  <%= nr.name %>: <%= model.name %>_<%= h.toPascalCase(nr.name) %>Input.optional(),
+<%
+  const nestedFk = nr.relationField ? nr.relationField.split(', ').map(f => f.trim()) : [];
+  const nestedFkFields = nestedFk.map(name => model.fields.find(f => f.name === name)).filter(Boolean);
+  const isNestedRequired = nestedFkFields.length > 0 && nestedFkFields.every(f => !f.isOptional && !f.hasDefault && !f.isServerDefault);
+-%>
+  <%= nr.name %>: <%= model.name %>_<%= h.toPascalCase(nr.name) %>Input<%= isNestedRequired ? '' : '.optional()' %>,
 <% } -%>
 });
 
@@ -66,6 +126,20 @@ export const Update<%= model.name %>Schema = Create<%= model.name %>Schema;
  */
 export const Patch<%= model.name %>Schema = Create<%= model.name %>Schema.partial();
 
+<% for (const relation of includeRelations) { -%>
+<% const targetModel = allModels.find(m => m.name === relation.relationModel); -%>
+<% if (targetModel) { -%>
+<% const targetResponseFields = targetModel.fields.filter(f => !f.isRelation && !f.directives.includes('hidden') && !f.directives.includes('writeOnly')); -%>
+export const <%= model.name %>_<%= h.toPascalCase(relation.name) %>RelationSchema = z.object({
+<% for (const field of targetResponseFields) { -%>
+<% const enumDef = enums.find(e => e.name === field.type); const zodType = enumDef ? `${enumDef.name}Schema` : (field.type === 'DateTime' ? 'z.coerce.date()' : h.prismaToZodType(field.type)); -%>
+  <%= field.name %>: <%= zodType %><%= field.isOptional ? '.nullish()' : (field.hasDefault ? '.optional()' : '') %>,
+<% } -%>
+});
+
+<% } -%>
+<% } -%>
+
 /**
  * Schema describing the API response shape for a <%= model.name %>.
  * @bcm.hidden and @bcm.writeOnly fields are excluded.
@@ -78,7 +152,23 @@ export const <%= model.name %>ResponseSchema = z.object({
 <% } -%>
 });
 
+/**
+ * Include-aware response schema for list/get endpoints when ?include=... is used.
+ * Relations are optional because include is request-driven.
+ */
+export const <%= model.name %>WithIncludesResponseSchema = <%= model.name %>ResponseSchema.extend({
+<% for (const relation of includeRelations) { -%>
+<% const targetModel = allModels.find(m => m.name === relation.relationModel); -%>
+<% if (targetModel) { -%>
+<% const relationSchemaName = `${model.name}_${h.toPascalCase(relation.name)}RelationSchema`; -%>
+<% const relationSchemaType = relation.isList ? `z.array(${relationSchemaName})` : `${relationSchemaName}${relation.isOptional ? '.nullable()' : ''}`; -%>
+  <%= relation.name %>: <%= relationSchemaType %>.optional(),
+<% } -%>
+<% } -%>
+});
+
 export type Create<%= model.name %>Input = z.infer<typeof Create<%= model.name %>Schema>;
 export type Update<%= model.name %>Input = z.infer<typeof Update<%= model.name %>Schema>;
 export type Patch<%= model.name %>Input = z.infer<typeof Patch<%= model.name %>Schema>;
 export type <%= model.name %>Response = z.infer<typeof <%= model.name %>ResponseSchema>;
+export type <%= model.name %>WithIncludesResponse = z.infer<typeof <%= model.name %>WithIncludesResponseSchema>;

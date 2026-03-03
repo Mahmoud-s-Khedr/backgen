@@ -29,6 +29,8 @@ model Project {
   tasks       Task[]
   /// @bcm.readonly
   createdAt   DateTime @default(now())
+
+  @@index([ownerId])
 }
 
 model Task {
@@ -47,6 +49,9 @@ model Task {
   createdAt DateTime @default(now())
   /// @bcm.readonly
   updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([assigneeId])
 }
 
 enum Status {

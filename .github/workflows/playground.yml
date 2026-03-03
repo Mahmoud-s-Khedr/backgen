@@ -1,0 +1,42 @@
+name: Playground CI
+
+on:
+  pull_request:
+    paths:
+      - "packages/playground/**"
+      - "src/**"
+      - ".github/workflows/playground.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "packages/playground/**"
+      - "src/**"
+      - ".github/workflows/playground.yml"
+
+jobs:
+  playground:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install root dependencies
+        run: npm ci
+      - name: Install playground dependencies
+        working-directory: packages/playground
+        run: npm ci
+      - name: Verify templates bundle is deterministic
+        working-directory: packages/playground
+        run: |
+          node build-templates.js
+          git diff --exit-code src/generated/templates.ts
+      - name: Typecheck
+        working-directory: packages/playground
+        run: npm run typecheck
+      - name: Test
+        working-directory: packages/playground
+        run: npm run test
+      - name: Build
+        working-directory: packages/playground
+        run: npm run build

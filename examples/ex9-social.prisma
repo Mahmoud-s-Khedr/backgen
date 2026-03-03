@@ -1,6 +1,6 @@
 // Example 9: Social Network
 // Complexity: Nine models with self-refs, polymorphic patterns, all directives
-// Demonstrates: self-referential relations, @bcm.searchable, @bcm.hidden, @bcm.writeOnly, @bcm.readonly, @bcm.protected, @bcm.auth(roles), @bcm.softDelete, @bcm.nested, enums
+// Demonstrates: self-referential relations, @bcm.searchable, @bcm.hidden, @bcm.writeOnly, @bcm.readonly, @bcm.protected, @bcm.softDelete, @bcm.nested, enums
 
 datasource db {
   provider = "postgresql"
@@ -56,6 +56,8 @@ model Post {
   /// @bcm.readonly
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@index([authorId])
 }
 
 /// @bcm.softDelete
@@ -76,6 +78,10 @@ model Comment {
   /// @bcm.readonly
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@index([authorId])
+  @@index([postId])
+  @@index([parentId])
 }
 
 model Like {
@@ -91,6 +97,9 @@ model Like {
 
   @@unique([userId, postId])
   @@unique([userId, commentId])
+  @@index([userId])
+  @@index([postId])
+  @@index([commentId])
 }
 
 model Follow {
@@ -117,6 +126,9 @@ model Message {
   readAt         DateTime?
   /// @bcm.readonly
   createdAt      DateTime     @default(now())
+
+  @@index([senderId])
+  @@index([conversationId])
 }
 
 /// @bcm.protected
@@ -140,6 +152,8 @@ model Notification {
   userId    String
   /// @bcm.readonly
   createdAt DateTime         @default(now())
+
+  @@index([userId])
 }
 
 model Media {
@@ -153,6 +167,9 @@ model Media {
   postId    String?
   /// @bcm.readonly
   createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([postId])
 }
 
 enum NotificationType {

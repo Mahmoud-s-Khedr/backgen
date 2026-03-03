@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: backgen-playground
+    env: node
+    rootDir: .
+    plan: free
+    autoDeploy: true
+    buildCommand: |
+      npm ci
+      npm run build
+      npm --prefix packages/playground ci
+      npm --prefix packages/playground run build
+    startCommand: npm --prefix packages/playground run start
+    envVars:
+      - key: NODE_ENV
+        value: production

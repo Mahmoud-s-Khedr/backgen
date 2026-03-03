@@ -1,0 +1,77 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -----------------------------------------------------------------------------
+// USER & AUTHENTICATION
+// -----------------------------------------------------------------------------
+
+/// @bcm.authModel
+model User {
+  id        String   @id @default(cuid())
+  /// @bcm.identifier
+  email     String   @unique
+  /// @bcm.password
+  password  String
+  name      String?
+  role      String   @default("USER")
+  createdAt DateTime @default(now())
+  
+  orders    Order[]
+}
+
+// -----------------------------------------------------------------------------
+// CATALOG: AUTHORS & BOOKS
+// -----------------------------------------------------------------------------
+
+model Author {
+  id        String   @id @default(cuid())
+  /// @bcm.searchable
+  name      String
+  bio       String?
+  createdAt DateTime @default(now())
+  
+  books     Book[]
+}
+
+/// @bcm.auth(roles: [ADMIN])
+/// @bcm.softDelete
+model Book {
+  id          String    @id @default(cuid())
+  /// @bcm.searchable
+  title       String
+  /// @bcm.searchable
+  description String?
+  price       Float
+  /// @bcm.readonly
+  stock       Int       @default(0)
+  
+  authorId    String
+  /// @bcm.nested
+  author      Author    @relation(fields: [authorId], references: [id])
+  
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+// -----------------------------------------------------------------------------
+// SALES: ORDERS
+// -----------------------------------------------------------------------------
+
+/// @bcm.protected
+model Order {
+  id        String   @id @default(cuid())
+  total     Float
+  status    String   @default("PENDING")
+  
+  userId    String
+  /// @bcm.nested
+  user      User     @relation(fields: [userId], references: [id])
+  
+  createdAt DateTime @default(now())
+}

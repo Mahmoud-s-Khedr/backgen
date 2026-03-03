@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { helpers, PRISMA_SCALAR_TYPES, renderInline } from '../src/generator/template-engine.js';
 
 describe('PRISMA_SCALAR_TYPES', () => {
@@ -26,6 +26,13 @@ describe('helpers', () => {
         it('preserves already-camelCase strings', () => {
             expect(helpers.toCamelCase('user')).toBe('user');
         });
+
+        it('normalizes acronyms, separators, and whitespace', () => {
+            expect(helpers.toCamelCase('APIUser')).toBe('apiUser');
+            expect(helpers.toCamelCase('user_profile')).toBe('userProfile');
+            expect(helpers.toCamelCase('user-profile')).toBe('userProfile');
+            expect(helpers.toCamelCase('api user')).toBe('apiUser');
+        });
     });
 
     describe('toPascalCase', () => {
@@ -36,6 +43,13 @@ describe('helpers', () => {
 
         it('preserves already-PascalCase strings', () => {
             expect(helpers.toPascalCase('User')).toBe('User');
+        });
+
+        it('normalizes acronyms, separators, and whitespace', () => {
+            expect(helpers.toPascalCase('APIUser')).toBe('ApiUser');
+            expect(helpers.toPascalCase('user_profile')).toBe('UserProfile');
+            expect(helpers.toPascalCase('user-profile')).toBe('UserProfile');
+            expect(helpers.toPascalCase('api user')).toBe('ApiUser');
         });
     });
 
@@ -123,11 +137,8 @@ describe('helpers', () => {
             expect(helpers.prismaToZodType('Decimal')).toBe('z.number()');
         });
 
-        it('defaults unknown types to z.string() with warning', () => {
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        it('defaults unknown types to z.string() silently', () => {
             expect(helpers.prismaToZodType('UnknownType')).toBe('z.string()');
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Unknown Prisma type'));
-            warnSpy.mockRestore();
         });
     });
 

@@ -1,6 +1,6 @@
 // Example 8: E-Commerce Platform
-// Complexity: Eight models with complex relations and enums
-// Demonstrates: enums, @bcm.searchable, @bcm.readonly, @bcm.hidden, @bcm.softDelete, @bcm.nested, @bcm.auth
+// Complexity: Nine models with complex relations and enums
+// Demonstrates: enums, @bcm.authModel, @bcm.identifier, @bcm.password, @bcm.searchable, @bcm.readonly, @bcm.hidden, @bcm.softDelete, @bcm.nested, @bcm.auth
 
 datasource db {
   provider = "postgresql"
@@ -9,6 +9,16 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model AdminUser {
+  id       String @id @default(uuid())
+  /// @bcm.identifier
+  email    String @unique
+  /// @bcm.password
+  password String
+  role     String @default("ADMIN")
 }
 
 model Customer {
@@ -36,6 +46,8 @@ model Address {
   customer   Customer @relation(fields: [customerId], references: [id])
   customerId String
   orders     Order[]
+
+  @@index([customerId])
 }
 
 /// @bcm.softDelete
@@ -58,6 +70,8 @@ model Product {
   /// @bcm.readonly
   updatedAt   DateTime    @updatedAt
   deletedAt   DateTime?
+
+  @@index([categoryId])
 }
 
 model Category {
@@ -91,6 +105,10 @@ model Order {
   createdAt  DateTime    @default(now())
   /// @bcm.readonly
   updatedAt  DateTime    @updatedAt
+
+  @@index([customerId])
+  @@index([addressId])
+  @@index([couponId])
 }
 
 model OrderItem {
@@ -102,6 +120,9 @@ model OrderItem {
   quantity  Int
   unitPrice Float
   total     Float
+
+  @@index([orderId])
+  @@index([productId])
 }
 
 model Review {
@@ -117,6 +138,8 @@ model Review {
   createdAt  DateTime @default(now())
 
   @@unique([customerId, productId])
+  @@index([customerId])
+  @@index([productId])
 }
 
 /// @bcm.auth(roles: [ADMIN])

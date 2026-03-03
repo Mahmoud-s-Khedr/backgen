@@ -1,18 +1,72 @@
 import { prisma } from '../../config/database.js';
 import type { QueryOptions } from '../../utils/query-builder.js';
 import { ProblemDetail } from '../../middlewares/error.middleware.js';
-import type { <%= model.name %> } from '@prisma/client';
+<% if (model.isAuthModel && model.passwordField) { -%>
+import bcrypt from 'bcryptjs';
+<% } -%>
+import type { <%= includeRelations.length > 0 ? `Prisma, ${model.name}` : model.name %> } from '@prisma/client';
 import type { Create<%= model.name %>Input, Patch<%= model.name %>Input } from './<%= h.toCamelCase(model.name) %>.dto.js';
+<% if (itemSelector) { -%>
+type <%= model.name %>Key = {
+<% for (const fieldMeta of itemSelectorFieldMeta) { -%>
+  <%= fieldMeta.name %>: <%= fieldMeta.tsType %>;
+<% } -%>
+};
+<% } -%>
 
 /**
  * <%= model.name %> Service
  * Handles database operations for the <%= model.name %> model.
  */
 export class <%= model.name %>Service {
+<% if (itemSelector) { -%>
+  private toWhereUnique(key: <%= model.name %>Key) {
+<% if (itemSelector.isComposite) { -%>
+    return {
+      <%= itemSelector.prismaWhereKey %>: {
+<% for (const fieldName of itemSelector.fields) { -%>
+        <%= fieldName %>: key.<%= fieldName %>,
+<% } -%>
+      },
+    };
+<% } else { -%>
+    return { <%= itemSelector.fields[0] %>: key.<%= itemSelector.fields[0] %> };
+<% } -%>
+  }
+
+  private keyDescription(key: <%= model.name %>Key): string {
+<% if (itemSelector.fields.length === 1) { -%>
+    return `<%= itemSelector.fields[0] %>=\"${key.<%= itemSelector.fields[0] %>}\"`;
+<% } else { -%>
+    return `<%= itemSelector.fields.map((f) => `${f}=\\\"\${key.${f}}\\\"`).join(', ') %>`;
+<% } -%>
+  }
+
+<% } -%>
+<% if (includeRelations.length > 0) { -%>
+  private toInclude(include?: Record<string, boolean>): Prisma.<%= model.name %>Include | undefined {
+    if (!include) {
+      return undefined;
+    }
+
+    const normalized: Prisma.<%= model.name %>Include = {};
+<% for (const relation of includeRelations) { -%>
+    if (include.<%= relation.name %>) {
+      normalized.<%= relation.name %> = true;
+    }
+<% } -%>
+
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+  }
+
+<% } -%>
   /**
    * Find many <%= h.pluralize(h.toCamelCase(model.name)) %> with pagination, sorting, and filtering.
    */
   async findMany(options: QueryOptions): Promise<{ data: <%= model.name %>[]; total: number }> {
+<% if (includeRelations.length > 0) { -%>
+    const include = this.toInclude(options.include);
+<% } -%>
     const [data, total] = await Promise.all([
       prisma.<%= h.toCamelCase(model.name) %>.findMany({
 <% if (isSoftDelete) { %>
@@ -23,8 +77,9 @@ export class <%= model.name %>Service {
         orderBy: options.orderBy,
         skip: options.skip,
         take: options.take,
-        // @ts-ignore -- Prisma types `include` as `never` for models without relations
-        include: options.include,
+<% if (includeRelations.length > 0) { -%>
+        ...(include ? { include } : {}),
+<% } -%>
       }),
 <% if (isSoftDelete) { %>
       prisma.<%= h.toCamelCase(model.name) %>.count({ where: { ...options.where, deletedAt: null } }),
@@ -35,33 +90,51 @@ export class <%= model.name %>Service {
     return { data, total };
   }
 
+<% if (itemSelector) { -%>
   /**
-   * Find a single <%= h.toCamelCase(model.name) %> by ID.
+   * Find a single <%= h.toCamelCase(model.name) %> by key.
    */
-  async findById(id: string, include?: Record<string, boolean>): Promise<<%= model.name %> | null> {
-    return prisma.<%= h.toCamelCase(model.name) %>.findUnique({
+  async findOne(key: <%= model.name %>Key, include?: Record<string, boolean>): Promise<<%= model.name %> | null> {
+<% if (includeRelations.length > 0) { -%>
+    const normalizedInclude = this.toInclude(include);
+<% } -%>
 <% if (isSoftDelete) { %>
-      where: { id, deletedAt: null },
-<% } else { %>
-      where: { id },
-<% } %>
-      // @ts-ignore -- Prisma types `include` as `never` for models without relations
-      include,
+    return prisma.<%= h.toCamelCase(model.name) %>.findFirst({
+      where: { ...this.toWhereUnique(key), deletedAt: null },
+<% if (includeRelations.length > 0) { -%>
+      ...(normalizedInclude ? { include: normalizedInclude } : {}),
+<% } -%>
     });
+<% } else { %>
+    return prisma.<%= h.toCamelCase(model.name) %>.findUnique({
+      where: this.toWhereUnique(key),
+<% if (includeRelations.length > 0) { -%>
+      ...(normalizedInclude ? { include: normalizedInclude } : {}),
+<% } -%>
+    });
+<% } %>
   }
+<% } -%>
 
   /**
    * Create a new <%= h.toCamelCase(model.name) %>.
    */
   async create(data: Create<%= model.name %>Input): Promise<<%= model.name %>> {
     try {
+<% if (model.isAuthModel && model.passwordField) { -%>
+      const createData = { ...data };
+      if (typeof createData.<%= model.passwordField %> === 'string') {
+        createData.<%= model.passwordField %> = await bcrypt.hash(createData.<%= model.passwordField %>, 12);
+      }
+<% } -%>
 <% if (nestedRelations.length > 0) { -%>
+      const createPayload = <%= model.isAuthModel && model.passwordField ? 'createData' : 'data' %> as any;
       return await prisma.<%= h.toCamelCase(model.name) %>.create({
-        data,
+        data: createPayload,
         include: { <%= nestedRelations.map(nr => nr.name + ': true').join(', ') %> },
       });
 <% } else { -%>
-      return await prisma.<%= h.toCamelCase(model.name) %>.create({ data });
+      return await prisma.<%= h.toCamelCase(model.name) %>.create({ data: <%= model.isAuthModel && model.passwordField ? 'createData' : 'data' %> });
 <% } -%>
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2002') {
@@ -76,12 +149,29 @@ export class <%= model.name %>Service {
     }
   }
 
+<% if (itemSelector) { -%>
   /**
-   * Update a <%= h.toCamelCase(model.name) %> by ID.
+   * Update a <%= h.toCamelCase(model.name) %> by key.
    */
-  async update(id: string, data: Create<%= model.name %>Input | Patch<%= model.name %>Input): Promise<<%= model.name %>> {
+  async update(key: <%= model.name %>Key, data: Create<%= model.name %>Input | Patch<%= model.name %>Input): Promise<<%= model.name %>> {
     try {
-      return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: { id }, data });
+<% if (model.isAuthModel && model.passwordField) { -%>
+      const updateData = { ...data };
+      if (typeof updateData.<%= model.passwordField %> === 'string') {
+        updateData.<%= model.passwordField %> = await bcrypt.hash(updateData.<%= model.passwordField %>, 12);
+      }
+<% if (nestedRelations.length > 0) { -%>
+      return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: this.toWhereUnique(key), data: updateData as any });
+<% } else { -%>
+      return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: this.toWhereUnique(key), data: updateData });
+<% } -%>
+<% } else { -%>
+<% if (nestedRelations.length > 0) { -%>
+      return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: this.toWhereUnique(key), data: data as any });
+<% } else { -%>
+      return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: this.toWhereUnique(key), data });
+<% } -%>
+<% } -%>
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && 'code' in error) {
         const code = (error as { code: string }).code;
@@ -90,7 +180,7 @@ export class <%= model.name %>Service {
             type: 'not-found',
             title: 'Not Found',
             status: 404,
-            detail: `<%= model.name %> with ID "${id}" not found.`,
+            detail: `<%= model.name %> with key "${this.keyDescription(key)}" not found.`,
           });
         }
         if (code === 'P2002') {
@@ -107,17 +197,17 @@ export class <%= model.name %>Service {
   }
 
   /**
-   * Delete a <%= h.toCamelCase(model.name) %> by ID.
+   * Delete a <%= h.toCamelCase(model.name) %> by key.
    */
-  async delete(id: string): Promise<void> {
+  async delete(key: <%= model.name %>Key): Promise<void> {
     try {
 <% if (isSoftDelete) { %>
       await prisma.<%= h.toCamelCase(model.name) %>.update({
-        where: { id },
+        where: this.toWhereUnique(key),
         data: { deletedAt: new Date() },
       });
 <% } else { %>
-      await prisma.<%= h.toCamelCase(model.name) %>.delete({ where: { id } });
+      await prisma.<%= h.toCamelCase(model.name) %>.delete({ where: this.toWhereUnique(key) });
 <% } %>
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2025') {
@@ -125,10 +215,11 @@ export class <%= model.name %>Service {
           type: 'not-found',
           title: 'Not Found',
           status: 404,
-          detail: `<%= model.name %> with ID "${id}" not found.`,
+          detail: `<%= model.name %> with key "${this.keyDescription(key)}" not found.`,
         });
       }
       throw error;
     }
   }
+<% } -%>
 }

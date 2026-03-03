@@ -11,6 +11,18 @@
  *   ?search=hello
  *   ?include=author,comments
  */
+import { ProblemDetail } from '../middlewares/error.middleware.js';
+
+export type FilterFieldType = 'string' | 'enum' | 'number' | 'bigint' | 'boolean' | 'datetime' | 'other';
+
+export interface QueryBuilderConfig {
+  allowedFilterFields?: string[];
+  searchableFields?: string[];
+  allowedIncludeRelations?: string[];
+  filterFieldTypes?: Record<string, FilterFieldType>;
+  defaultSortField?: string;
+}
+
 export interface QueryOptions {
   where?: Record<string, any>;
   orderBy?: Record<string, string>;
@@ -20,44 +32,106 @@ export interface QueryOptions {
   page: number;
 }
 
+function filterValueError(field: string, expected: string): ProblemDetail {
+  return new ProblemDetail({
+    type: 'validation-error',
+    title: 'Validation Error',
+    status: 422,
+    detail: `Invalid filter value for "${field}". Expected ${expected}.`,
+  });
+}
+
+function parseFilterValue(field: string, rawValue: unknown, fieldType: FilterFieldType): unknown {
+  if (typeof rawValue !== 'string') {
+    throw filterValueError(field, 'a string literal');
+  }
+
+  if (fieldType === 'number') {
+    const num = Number(rawValue);
+    if (!Number.isFinite(num)) {
+      throw filterValueError(field, 'a numeric value');
+    }
+    return num;
+  }
+
+  if (fieldType === 'bigint') {
+    try {
+      return BigInt(rawValue);
+    } catch {
+      throw filterValueError(field, 'an integer value');
+    }
+  }
+
+  if (fieldType === 'boolean') {
+    if (rawValue === 'true') return true;
+    if (rawValue === 'false') return false;
+    throw filterValueError(field, 'true or false');
+  }
+
+  if (fieldType === 'datetime') {
+    const date = new Date(rawValue);
+    if (Number.isNaN(date.getTime())) {
+      throw filterValueError(field, 'an ISO datetime value');
+    }
+    return date;
+  }
+
+  if (fieldType === 'enum') {
+    return rawValue;
+  }
+
+  if (fieldType === 'string') {
+<% if (datasource.provider === 'postgresql' || datasource.provider === 'mysql') { %>
+    return { contains: rawValue, mode: 'insensitive' as const };
+<% } else { %>
+    return { contains: rawValue };
+<% } %>
+  }
+
+  return rawValue;
+}
+
 export function buildQueryOptions(
   query: Record<string, any>,
-  allowedFilterFields: string[] = [],
-  searchableFields: string[] = [],
+  config: QueryBuilderConfig = {},
 ): QueryOptions {
-  const page = Math.max(1, parseInt(query.page || '1', 10));
-  const limit = Math.min(100, Math.max(1, parseInt(query.limit || '20', 10)));
+  const {
+    allowedFilterFields = [],
+    searchableFields = [],
+    allowedIncludeRelations = [],
+    filterFieldTypes = {},
+    defaultSortField,
+  } = config;
+
+  const pageRaw = parseInt(String(query.page ?? '1'), 10);
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+  const limitRaw = parseInt(String(query.limit ?? '20'), 10);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(100, limitRaw) : 20;
   const skip = (page - 1) * limit;
 
-  // Sorting — validate sort field against allowed fields
-  const sortField = query.sort || 'id';
-  const sort = allowedFilterFields.length === 0 || allowedFilterFields.includes(sortField)
-    ? sortField
-    : 'id';
+  // Sorting — validate sort field against allowed fields; use model fallback when provided.
+  const requestedSort = typeof query.sort === 'string' ? query.sort : undefined;
+  let sortField: string | undefined;
+  if (requestedSort && (allowedFilterFields.length === 0 || allowedFilterFields.includes(requestedSort))) {
+    sortField = requestedSort;
+  } else if (
+    defaultSortField &&
+    (allowedFilterFields.length === 0 || allowedFilterFields.includes(defaultSortField))
+  ) {
+    sortField = defaultSortField;
+  }
   const order = query.order === 'asc' ? 'asc' : 'desc';
-  const orderBy = { [sort]: order };
+  const orderBy = sortField ? { [sortField]: order } : undefined;
 
-  // Filtering — only allow known fields
+  // Filtering — only allow known fields, parse by field type
   const where: Record<string, any> = {};
-  if (query.filter && typeof query.filter === 'object') {
+  if (query.filter && typeof query.filter === 'object' && !Array.isArray(query.filter)) {
     for (const [key, value] of Object.entries(query.filter)) {
       if (allowedFilterFields.length > 0 && !allowedFilterFields.includes(key)) {
-        continue; // Skip unknown filter fields
+        continue;
       }
-      if (typeof value === 'string') {
-        const num = Number(value);
-        if (!isNaN(num)) {
-          where[key] = num;
-        } else if (value === 'true' || value === 'false') {
-          where[key] = value === 'true';
-        } else {
-<% if (datasource.provider === 'postgresql' || datasource.provider === 'mysql') { %>
-          where[key] = { contains: value, mode: 'insensitive' };
-<% } else { %>
-          where[key] = { contains: value };
-<% } %>
-        }
-      }
+      const fieldType = filterFieldTypes[key] ?? 'string';
+      where[key] = parseFilterValue(key, value, fieldType);
     }
   }
 
@@ -76,11 +150,27 @@ export function buildQueryOptions(
 
   // Includes
   let include: Record<string, boolean> | undefined;
-  if (query.include) {
-    include = {};
-    const relations = query.include.split(',').map((r: string) => r.trim());
-    for (const relation of relations) {
-      include[relation] = true;
+  if (query.include !== undefined) {
+    const relations = String(query.include)
+      .split(',')
+      .map((r: string) => r.trim())
+      .filter(Boolean);
+    const invalidRelations = relations.filter(
+      (relation) => !allowedIncludeRelations.includes(relation)
+    );
+    if (invalidRelations.length > 0) {
+      throw new ProblemDetail({
+        type: 'validation-error',
+        title: 'Validation Error',
+        status: 422,
+        detail: `Unknown include relation(s): ${invalidRelations.join(', ')}`,
+      });
+    }
+    if (relations.length > 0) {
+      include = {};
+      for (const relation of relations) {
+        include[relation] = true;
+      }
     }
   }
 

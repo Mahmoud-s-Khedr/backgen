@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFile } from 'fs/promises';
 import type { ParsedSchema } from './types.js';
 import { parsePrismaAst } from './prisma-ast-parser.js';
 
@@ -13,7 +13,7 @@ import { parsePrismaAst } from './prisma-ast-parser.js';
  * @returns Parsed schema with models, enums, datasource, and directives
  */
 export async function parseSchema(schemaPath: string): Promise<ParsedSchema> {
-    const schemaContent = readFileSync(schemaPath, 'utf-8');
+    const schemaContent = await readFile(schemaPath, 'utf-8');
 
     if (!schemaContent.trim()) {
         throw new Error(`Schema file is empty: ${schemaPath}`);

@@ -104,7 +104,7 @@ generator client {
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
-  /// @bcm.hidden
+  /// @bcm.writeOnly
   password  String
   name      String?
   /// @bcm.readonly

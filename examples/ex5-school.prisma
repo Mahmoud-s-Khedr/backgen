@@ -1,6 +1,6 @@
-// Example 5: School Management (MySQL)
+// Example 5: School Management
 // Complexity: Four models with many-to-many via junction table
-// Demonstrates: many-to-many relations, junction table, @bcm.searchable, @bcm.readonly, MySQL provider
+// Demonstrates: many-to-many relations, junction table, @bcm.searchable, @bcm.readonly
 
 datasource db {
   provider = "postgresql"
@@ -43,6 +43,8 @@ model Course {
   teacher     Teacher      @relation(fields: [teacherId], references: [id])
   teacherId   String
   enrollments Enrollment[]
+
+  @@index([teacherId])
 }
 
 model Enrollment {
@@ -57,4 +59,6 @@ model Enrollment {
   enrolledAt DateTime @default(now())
 
   @@unique([studentId, courseId, semester])
+  @@index([studentId])
+  @@index([courseId])
 }

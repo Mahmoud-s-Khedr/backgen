@@ -1,198 +1,459 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { parsePrismaSchema, generateProject, type GeneratedFile } from './generator.js';
 import JSZip from 'jszip';
+import { generateFromSchema, type GenerationResult } from './generator.js';
+import { INSTRUCTION_SECTIONS, SCHEMA_EXAMPLES, COMMON_MISTAKES } from './schema-instructions.js';
+import { decodeSchemaFromUrl, encodeSchemaForUrl } from './schema-share.js';
+import { buildMetadataFile, buildZipFileName } from './zip.js';
+import {
+    THEME_STORAGE_KEY,
+    WORKSPACE_TABS,
+    normalizeWorkspaceTab,
+    resolveThemeMode,
+    toggleThemeMode,
+    type ThemeMode,
+    type WorkspaceTab,
+} from './ui-state.js';
 
-const DEFAULT_SCHEMA = `datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+const DEFAULT_SCHEMA = SCHEMA_EXAMPLES.find((example) => example.id === 'auth')!.schema;
+const TAB_ORDER = ['start', 'models', 'directives', 'examples'] as const;
+type TabId = typeof TAB_ORDER[number];
+const COMPACT_BREAKPOINT_QUERY = '(max-width: 1199px)';
 
-generator client {
-  provider = "prisma-client-js"
-}
-
-enum Role {
-  USER
-  ADMIN
-}
-
-/// @bcm.protected
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  /// @bcm.writeOnly
-  password  String
-  role      Role     @default(USER)
-  name      String?
-  /// @bcm.readonly
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  posts     Post[]
-}
-
-/// @bcm.softDelete
-model Post {
-  id        String    @id @default(cuid())
-  /// @bcm.searchable
-  title     String
-  content   String?
-  authorId  String
-  author    User      @relation(fields: [authorId], references: [id])
-  deletedAt DateTime?
-}
-`;
+const EMPTY_RESULT: GenerationResult = {
+    files: [],
+    warnings: [],
+    errors: [],
+    modelCount: 0,
+    enumCount: 0,
+};
 
 export function App() {
     const [schema, setSchema] = useState(DEFAULT_SCHEMA);
-    const [files, setFiles] = useState<GeneratedFile[]>([]);
+    const [result, setResult] = useState<GenerationResult>(EMPTY_RESULT);
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+    const [activeTab, setActiveTab] = useState<TabId>('start');
+    const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('editor');
+    const [helpOpen, setHelpOpen] = useState(false);
+    const [copyStatus, setCopyStatus] = useState('');
+    const [isCompactLayout, setIsCompactLayout] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        return window.matchMedia(COMPACT_BREAKPOINT_QUERY).matches;
+    });
+    const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+        if (typeof window === 'undefined') return 'dark';
+        const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+        const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+        return resolveThemeMode(stored, prefersDark);
+    });
 
-    const generate = useCallback((schemaContent: string) => {
-        try {
-            const parsed = parsePrismaSchema(schemaContent);
-            const generated = generateProject(parsed, schemaContent);
-            setFiles(generated);
-            setError(null);
-            if (!selectedFile || !generated.find(f => f.path === selectedFile)) {
-                setSelectedFile(generated[0]?.path ?? null);
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const latestGenerationRef = useRef(0);
+
+    const runGeneration = useCallback(async (schemaContent: string) => {
+        const generationId = latestGenerationRef.current + 1;
+        latestGenerationRef.current = generationId;
+
+        const generated = await generateFromSchema(schemaContent);
+        if (generationId !== latestGenerationRef.current) return;
+
+        setResult(generated);
+        setSelectedFile((current) => {
+            if (current && generated.files.some((file) => file.path === current)) {
+                return current;
             }
-        } catch (e: unknown) {
-            setError(e instanceof Error ? e.message : String(e));
-            setFiles([]);
-        }
-    }, [selectedFile]);
+            return generated.files[0]?.path ?? null;
+        });
+    }, []);
 
     useEffect(() => {
-        generate(schema);
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+        const media = window.matchMedia(COMPACT_BREAKPOINT_QUERY);
+        const sync = () => setIsCompactLayout(media.matches);
+        sync();
+        media.addEventListener('change', sync);
+        return () => media.removeEventListener('change', sync);
+    }, []);
+
+    useEffect(() => {
+        document.documentElement.dataset.theme = themeMode;
+        window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    }, [themeMode]);
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const encoded = params.get('schema');
+        const decoded = encoded ? decodeSchemaFromUrl(encoded) : null;
+        const initialSchema = decoded ?? DEFAULT_SCHEMA;
+        setSchema(initialSchema);
+        void runGeneration(initialSchema);
+    }, [runGeneration]);
 
     const handleSchemaChange = useCallback((value: string | undefined) => {
-        const v = value ?? '';
-        setSchema(v);
+        const nextSchema = value ?? '';
+        setSchema(nextSchema);
         clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(() => generate(v), 300);
-    }, [generate]);
+        debounceRef.current = setTimeout(() => {
+            void runGeneration(nextSchema);
+        }, 350);
+    }, [runGeneration]);
 
-    const handleDownload = useCallback(async () => {
+    const applyExample = useCallback((exampleId: string) => {
+        const example = SCHEMA_EXAMPLES.find((item) => item.id === exampleId);
+        if (!example) return;
+        setSchema(example.schema);
+        setActiveTab('examples');
+        setActiveWorkspaceTab('editor');
+        void runGeneration(example.schema);
+    }, [runGeneration]);
+
+    const shareSchema = useCallback(async () => {
+        const encoded = encodeSchemaForUrl(schema);
+        const target = new URL(window.location.href);
+        target.searchParams.set('schema', encoded);
+        const value = target.toString();
+        window.history.replaceState(null, '', target);
+        try {
+            await navigator.clipboard.writeText(value);
+            setCopyStatus('Share link copied');
+        } catch {
+            setCopyStatus('Copy failed in this browser');
+        }
+        window.setTimeout(() => setCopyStatus(''), 1800);
+    }, [schema]);
+
+    const downloadZip = useCallback(async () => {
+        if (result.files.length === 0) return;
+        const now = new Date();
         const zip = new JSZip();
-        for (const file of files) {
+        for (const file of result.files) {
             zip.file(file.path, file.content);
         }
+        const metadata = buildMetadataFile(result, now);
+        zip.file(metadata.path, metadata.content);
+
         const blob = await zip.generateAsync({ type: 'blob' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'generated-api.zip';
+        a.download = buildZipFileName(now);
         a.click();
         URL.revokeObjectURL(url);
-    }, [files]);
+    }, [result]);
 
-    const selectedContent = files.find(f => f.path === selectedFile)?.content ?? '';
+    const fileTree = useMemo(() => {
+        const grouped = new Map<string, string[]>();
+        for (const file of result.files) {
+            const parts = file.path.split('/');
+            const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
+            if (!grouped.has(dir)) grouped.set(dir, []);
+            grouped.get(dir)!.push(file.path);
+        }
+        for (const paths of grouped.values()) {
+            paths.sort((a, b) => a.localeCompare(b));
+        }
+        return Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    }, [result.files]);
 
-    // Group files by directory
-    const fileTree = new Map<string, string[]>();
-    for (const f of files) {
-        const parts = f.path.split('/');
-        const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
-        if (!fileTree.has(dir)) fileTree.set(dir, []);
-        fileTree.get(dir)!.push(f.path);
-    }
+    const selectedContent = result.files.find((file) => file.path === selectedFile)?.content ?? '';
+    const activeSection = INSTRUCTION_SECTIONS.find((section) => section.id === activeTab)!;
+    const editorTheme = themeMode === 'dark' ? 'vs-dark' : 'vs';
+
+    const setWorkspaceTab = useCallback((tab: WorkspaceTab) => {
+        setActiveWorkspaceTab(normalizeWorkspaceTab(tab));
+    }, []);
+
+    const openHelp = useCallback(() => {
+        if (isCompactLayout) {
+            setWorkspaceTab('help');
+            return;
+        }
+        setHelpOpen((current) => !current);
+    }, [isCompactLayout, setWorkspaceTab]);
+
+    const showPane = useCallback((pane: WorkspaceTab) => !isCompactLayout || activeWorkspaceTab === pane, [activeWorkspaceTab, isCompactLayout]);
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1e1e1e', color: '#d4d4d4' }}>
-            {/* Header */}
-            <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', background: '#252526', borderBottom: '1px solid #3c3c3c' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <h1 style={{ fontSize: 16, fontWeight: 600, color: '#e0e0e0' }}>Backend Creator Playground</h1>
-                    <span style={{ fontSize: 12, color: '#888', background: '#333', padding: '2px 8px', borderRadius: 4 }}>
-                        {files.length} files
-                    </span>
+        <div className="app-shell">
+            <header className="topbar" role="banner">
+                <div className="branding">
+                    <p className="eyebrow">Backgen Playground</p>
+                    <h1>Generate backend scaffolds directly from Prisma</h1>
+                    <p className="subtitle">Draft schema, inspect generated files, and export a runnable backend ZIP.</p>
                 </div>
-                <button
-                    onClick={handleDownload}
-                    disabled={files.length === 0}
-                    style={{
-                        padding: '6px 16px', borderRadius: 4, border: 'none', cursor: 'pointer',
-                        background: files.length > 0 ? '#0e639c' : '#555', color: '#fff', fontSize: 13,
-                    }}
-                >
-                    Download ZIP
-                </button>
+                <div className="topbar-actions">
+                    <span className="chip">{result.files.length} files</span>
+                    <span className="chip">{result.modelCount} models</span>
+                    <span className="chip">{result.enumCount} enums</span>
+                    <button type="button" className="btn" onClick={shareSchema}>Share Schema</button>
+                    <button type="button" className="btn" onClick={downloadZip} disabled={result.files.length === 0}>
+                        Download ZIP
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => setThemeMode((current) => toggleThemeMode(current))}
+                        aria-label="Toggle light and dark theme"
+                    >
+                        {themeMode === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={openHelp}
+                        aria-pressed={!isCompactLayout && helpOpen}
+                        aria-label="Toggle guide panel"
+                    >
+                        {isCompactLayout ? 'Guide' : helpOpen ? 'Hide Guide' : 'Show Guide'}
+                    </button>
+                </div>
             </header>
 
-            {/* Main content */}
-            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-                {/* Left: Schema editor */}
-                <div style={{ width: '35%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #3c3c3c' }}>
-                    <div style={{ padding: '6px 12px', background: '#2d2d2d', fontSize: 12, color: '#aaa', borderBottom: '1px solid #3c3c3c' }}>
-                        schema.prisma
-                    </div>
-                    <div style={{ flex: 1 }}>
-                        <Editor
-                            defaultLanguage="prisma"
-                            value={schema}
-                            onChange={handleSchemaChange}
-                            theme="vs-dark"
-                            options={{ minimap: { enabled: false }, fontSize: 13, lineNumbers: 'on', wordWrap: 'on', scrollBeyondLastLine: false }}
-                        />
-                    </div>
-                    {error && (
-                        <div style={{ padding: 8, background: '#5a1d1d', color: '#f48771', fontSize: 12, maxHeight: 80, overflow: 'auto' }}>
-                            {error}
-                        </div>
-                    )}
-                </div>
+            <section className="quick-actions" aria-label="Schema quick actions">
+                {SCHEMA_EXAMPLES.map((example) => (
+                    <button
+                        key={example.id}
+                        type="button"
+                        className="quick-action"
+                        onClick={() => applyExample(example.id)}
+                        aria-label={`Insert ${example.label} schema example`}
+                    >
+                        <span className="quick-action-title">{example.label}</span>
+                        <span className="quick-action-desc">{example.description}</span>
+                    </button>
+                ))}
+            </section>
 
-                {/* Center: File tree */}
-                <div style={{ width: '20%', overflow: 'auto', borderRight: '1px solid #3c3c3c', background: '#252526' }}>
-                    <div style={{ padding: '6px 12px', background: '2d2d2d', fontSize: 12, color: '#aaa', borderBottom: '1px solid #3c3c3c' }}>
-                        Generated Files
-                    </div>
-                    {Array.from(fileTree.entries()).map(([dir, paths]) => (
-                        <div key={dir} style={{ marginBottom: 4 }}>
-                            <div style={{ padding: '4px 12px', fontSize: 11, color: '#888', fontWeight: 600 }}>{dir}/</div>
-                            {paths.map(path => {
-                                const filename = path.split('/').pop();
-                                const isSelected = path === selectedFile;
-                                return (
-                                    <div
-                                        key={path}
-                                        onClick={() => setSelectedFile(path)}
-                                        style={{
-                                            padding: '3px 12px 3px 24px', fontSize: 12, cursor: 'pointer',
-                                            background: isSelected ? '#094771' : 'transparent',
-                                            color: isSelected ? '#fff' : '#ccc',
-                                        }}
-                                    >
-                                        {filename}
-                                    </div>
-                                );
-                            })}
-                        </div>
+            {copyStatus && (
+                <div className="status-banner" role="status" aria-live="polite">{copyStatus}</div>
+            )}
+
+            {isCompactLayout && (
+                <nav className="workspace-tabs" aria-label="Workspace sections">
+                    {WORKSPACE_TABS.map((tab) => (
+                        <button
+                            key={tab}
+                            type="button"
+                            className={`workspace-tab ${activeWorkspaceTab === tab ? 'active' : ''}`}
+                            onClick={() => setWorkspaceTab(tab)}
+                        >
+                            {workspaceTabLabel(tab)}
+                        </button>
                     ))}
-                </div>
+                </nav>
+            )}
 
-                {/* Right: File preview */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ padding: '6px 12px', background: '#2d2d2d', fontSize: 12, color: '#aaa', borderBottom: '1px solid #3c3c3c' }}>
-                        {selectedFile ?? 'Select a file'}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                        <Editor
-                            key={selectedFile}
-                            language={getLanguage(selectedFile ?? '')}
-                            value={selectedContent}
-                            theme="vs-dark"
-                            options={{ readOnly: true, minimap: { enabled: false }, fontSize: 13, lineNumbers: 'on', scrollBeyondLastLine: false }}
+            <div className="workspace-frame">
+                <main className="workspace-grid" role="main">
+                    <section className={`panel pane-editor ${showPane('editor') ? '' : 'is-hidden'}`} aria-label="Schema editor">
+                        <div className="panel-head">
+                            <span>schema.prisma</span>
+                        </div>
+                        <div className="editor-wrap">
+                            <Editor
+                                defaultLanguage="prisma"
+                                value={schema}
+                                onChange={handleSchemaChange}
+                                theme={editorTheme}
+                                options={{
+                                    minimap: { enabled: false },
+                                    fontSize: 13,
+                                    lineNumbers: 'on',
+                                    wordWrap: 'on',
+                                    scrollBeyondLastLine: false,
+                                }}
+                            />
+                        </div>
+
+                        {result.errors.length > 0 && (
+                            <div className="messages error" role="alert">
+                                <h3>Generation errors</h3>
+                                {result.errors.map((error, i) => <p key={`${error}-${i}`}>{error}</p>)}
+                            </div>
+                        )}
+
+                        {result.warnings.length > 0 && (
+                            <div className="messages warning" role="status" aria-live="polite">
+                                <h3>Warnings</h3>
+                                {result.warnings.map((warning, i) => <p key={`${warning}-${i}`}>{warning}</p>)}
+                            </div>
+                        )}
+                    </section>
+
+                    <section className={`panel pane-files ${showPane('files') ? '' : 'is-hidden'}`} aria-label="Generated file explorer">
+                        <div className="panel-head">
+                            <span>Generated Files</span>
+                        </div>
+                        <div className="files-scroll">
+                            {fileTree.length === 0 && (
+                                <p className="empty-state">No generated files yet.</p>
+                            )}
+                            {fileTree.map(([dir, paths]) => (
+                                <div key={dir}>
+                                    <div className="dir-row">{dir}/</div>
+                                    {paths.map((path) => {
+                                        const filename = path.split('/').pop();
+                                        const isSelected = path === selectedFile;
+                                        return (
+                                            <button
+                                                key={path}
+                                                type="button"
+                                                className={`file-row ${isSelected ? 'selected' : ''}`}
+                                                onClick={() => {
+                                                    setSelectedFile(path);
+                                                    if (isCompactLayout) setWorkspaceTab('preview');
+                                                }}
+                                            >
+                                                {filename}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+
+                    <section className={`panel pane-preview ${showPane('preview') ? '' : 'is-hidden'}`} aria-label="Generated file preview">
+                        <div className="panel-head">
+                            <span>{selectedFile ?? 'Select a generated file'}</span>
+                        </div>
+                        <div className="editor-wrap">
+                            <Editor
+                                key={selectedFile}
+                                language={getLanguage(selectedFile ?? '')}
+                                value={selectedContent}
+                                theme={editorTheme}
+                                options={{
+                                    readOnly: true,
+                                    minimap: { enabled: false },
+                                    fontSize: 13,
+                                    lineNumbers: 'on',
+                                    scrollBeyondLastLine: false,
+                                }}
+                            />
+                        </div>
+
+                        {result.files.length > 0 && (
+                            <div className="next-steps">
+                                <h3>Next steps</h3>
+                                <ol>
+                                    <li><code>npm install</code></li>
+                                    <li><code>cp .env.example .env</code></li>
+                                    <li><code>npx prisma migrate dev --name init</code></li>
+                                    <li><code>npm run dev</code></li>
+                                </ol>
+                            </div>
+                        )}
+                    </section>
+
+                    {isCompactLayout && (
+                        <section className={`panel pane-help ${showPane('help') ? '' : 'is-hidden'}`} aria-label="Schema guide">
+                            <HelpContent
+                                activeTab={activeTab}
+                                setActiveTab={setActiveTab}
+                                activeSection={activeSection}
+                                applyExample={applyExample}
+                            />
+                        </section>
+                    )}
+                </main>
+
+                {!isCompactLayout && (
+                    <aside className={`help-drawer ${helpOpen ? 'open' : ''}`} aria-label="Schema guide drawer">
+                        <HelpContent
+                            activeTab={activeTab}
+                            setActiveTab={setActiveTab}
+                            activeSection={activeSection}
+                            applyExample={applyExample}
                         />
-                    </div>
-                </div>
+                    </aside>
+                )}
             </div>
         </div>
     );
+}
+
+interface HelpContentProps {
+    activeTab: TabId;
+    setActiveTab: (tab: TabId) => void;
+    activeSection: {
+        intro: string;
+        bullets: string[];
+        code?: string;
+    };
+    applyExample: (id: string) => void;
+}
+
+function HelpContent({ activeTab, setActiveTab, activeSection, applyExample }: HelpContentProps) {
+    return (
+        <>
+            <div className="panel-head">
+                <span>How to Write Schema</span>
+            </div>
+            <div className="tab-row" role="tablist" aria-label="Schema help tabs">
+                {TAB_ORDER.map((tab) => {
+                    const section = INSTRUCTION_SECTIONS.find((item) => item.id === tab)!;
+                    return (
+                        <button
+                            key={tab}
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === tab}
+                            className={`tab ${activeTab === tab ? 'active' : ''}`}
+                            onClick={() => setActiveTab(tab)}
+                        >
+                            {section.label}
+                        </button>
+                    );
+                })}
+            </div>
+            <div className="help-content">
+                <p>{activeSection.intro}</p>
+                <ul>
+                    {activeSection.bullets.map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                    ))}
+                </ul>
+
+                {activeSection.code && (
+                    <pre>
+                        <code>{activeSection.code}</code>
+                    </pre>
+                )}
+
+                {activeTab === 'examples' && (
+                    <div className="example-actions">
+                        {SCHEMA_EXAMPLES.map((example) => (
+                            <button key={example.id} type="button" onClick={() => applyExample(example.id)}>
+                                {example.label}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                <div className="checklist">
+                    <h3>Fix common mistakes</h3>
+                    <ul>
+                        {COMMON_MISTAKES.map((mistake) => <li key={mistake}>{mistake}</li>)}
+                    </ul>
+                </div>
+            </div>
+        </>
+    );
+}
+
+function workspaceTabLabel(tab: WorkspaceTab): string {
+    switch (tab) {
+        case 'editor':
+            return 'Editor';
+        case 'files':
+            return 'Files';
+        case 'preview':
+            return 'Preview';
+        case 'help':
+            return 'Guide';
+        default:
+            return 'Editor';
+    }
 }
 
 function getLanguage(path: string): string {

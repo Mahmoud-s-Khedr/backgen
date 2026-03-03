@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../../config/database.js';
 import { env } from '../../config/env.js';
@@ -9,8 +10,14 @@ import { sendSuccess } from '../../utils/response.js';
 
 const router = Router();
 
+<%
+const identifierDef = authModel?.fields?.find((field) => field.name === identifierField);
+const identifierZodType = identifierDef?.isEnum
+  ? 'z.string()'
+  : h.prismaToZodType(identifierDef?.type || 'String');
+-%>
 const LoginSchema = z.object({
-  <%= identifierField %>: z.string(),
+  <%= identifierField %>: <%= identifierZodType %>,
   <%= passwordField %>: z.string(),
 });
 
@@ -22,7 +29,10 @@ router.post('/login', validate(LoginSchema), async (req, res, next) => {
   try {
     const { <%= identifierField %>, <%= passwordField %> } = req.body as z.infer<typeof LoginSchema>;
     const user = await prisma.<%= authModelLower %>.findUnique({ where: { <%= identifierField %> } });
-    if (!user || user.<%= passwordField %> !== <%= passwordField %>) {
+    const isValid = user
+      ? await bcrypt.compare(<%= passwordField %>, user.<%= passwordField %>)
+      : false;
+    if (!isValid || !user) {
       return next(new ProblemDetail({
         type: 'unauthorized',
         title: 'Invalid credentials',
@@ -31,7 +41,15 @@ router.post('/login', validate(LoginSchema), async (req, res, next) => {
       }));
     }
     const token = jwt.sign(
-      { id: user.id, <%= identifierField %>: user.<%= identifierField %> },
+      {
+        id: user.id,
+<% if (roleField) { -%>
+        role: user.<%= roleField %>,
+<% } -%>
+<% if (identifierField !== 'id') { -%>
+        <%= identifierField %>: user.<%= identifierField %>,
+<% } -%>
+      },
       env.JWT_SECRET,
       { expiresIn: '7d' }
     );

@@ -34,16 +34,35 @@ export interface TemplateHelpers {
     prismaToTsType: (prismaType: string) => string;
 }
 
+function splitWords(str: string): string[] {
+    return str
+        .trim()
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[_\-\s]+/g, ' ')
+        .split(' ')
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean);
+}
+
+function capitalize(word: string): string {
+    return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
 /**
  * Common helpers injected into every EJS template.
  */
 export const helpers: TemplateHelpers = {
     toCamelCase(str: string): string {
-        return str.charAt(0).toLowerCase() + str.slice(1);
+        const words = splitWords(str);
+        if (words.length === 0) {
+            return '';
+        }
+        return words[0] + words.slice(1).map(capitalize).join('');
     },
 
     toPascalCase(str: string): string {
-        return str.charAt(0).toUpperCase() + str.slice(1);
+        return splitWords(str).map(capitalize).join('');
     },
 
     toKebabCase(str: string): string {
@@ -85,9 +104,6 @@ export const helpers: TemplateHelpers = {
             'Bytes': 'z.string()',
             'BigInt': 'z.bigint()',
         };
-        if (!map[prismaType]) {
-            console.warn(`Warning: Unknown Prisma type "${prismaType}", defaulting to z.string()`);
-        }
         return map[prismaType] || `z.string()`;
     },
 

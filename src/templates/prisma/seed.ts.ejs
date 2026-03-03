@@ -105,7 +105,8 @@ async function main() {
   await prisma.<%= h.toCamelCase(model.name) %>.deleteMany();
 <% } -%>
   // parentIds[ModelName] = array of seeded IDs, populated as each parent table is seeded
-  const parentIds: Record<string, string[]> = {};
+  type ParentId = string | number | bigint | Date;
+  const parentIds: Record<string, ParentId[]> = {};
 <% for (const model of models) { -%>
 <%
   const modelVar = h.toCamelCase(model.name);

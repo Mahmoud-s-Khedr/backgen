@@ -44,14 +44,24 @@ Once the server is running, visit:
 <% for (const model of models) { -%>
 ### <%= model.name %>
 
+<%
+const singleId = model.selectors?.find((s) => s.kind === 'id' && s.fields.length === 1);
+const compositeId = model.selectors?.find((s) => s.kind === 'id' && s.fields.length > 1);
+const singleUnique = model.selectors?.find((s) => s.kind === 'unique' && s.fields.length === 1);
+const compositeUnique = model.selectors?.find((s) => s.kind === 'unique' && s.fields.length > 1);
+const resolvedSelector = singleId || compositeId || singleUnique || compositeUnique;
+const selectorPath = resolvedSelector ? '/' + resolvedSelector.fields.map((f) => `:${f}`).join('/') : null;
+-%>
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | \`/api/<%= h.pluralize(h.toCamelCase(model.name)) %>\` | List all |
-| GET | \`/api/<%= h.pluralize(h.toCamelCase(model.name)) %>/:id\` | Get by ID |
 | POST | \`/api/<%= h.pluralize(h.toCamelCase(model.name)) %>\` | Create |
-| PUT | \`/api/<%= h.pluralize(h.toCamelCase(model.name)) %>/:id\` | Full update |
-| PATCH | \`/api/<%= h.pluralize(h.toCamelCase(model.name)) %>/:id\` | Partial update |
-| DELETE | \`/api/<%= h.pluralize(h.toCamelCase(model.name)) %>/:id\` | Delete |
+<% if (selectorPath) { -%>
+| GET | \`/api/<%= h.pluralize(h.toCamelCase(model.name)) %><%= selectorPath %>\` | Get by key |
+| PUT | \`/api/<%= h.pluralize(h.toCamelCase(model.name)) %><%= selectorPath %>\` | Full update |
+| PATCH | \`/api/<%= h.pluralize(h.toCamelCase(model.name)) %><%= selectorPath %>\` | Partial update |
+| DELETE | \`/api/<%= h.pluralize(h.toCamelCase(model.name)) %><%= selectorPath %>\` | Delete |
+<% } -%>
 
 <% } -%>
 ## Query Parameters

@@ -164,6 +164,18 @@ model Todo {
             expect(priorityField.hasDefault).toBe(true);
             expect(priorityField.isServerDefault).toBe(false);
         });
+
+        it('does not treat string literals containing parentheses as server defaults', () => {
+            const result = parsePrismaAst(schema(`
+model MessageTemplate {
+  id      String @id @default(cuid())
+  pattern String @default("hello(world)")
+}`));
+            const patternField = result.models[0].fields.find(f => f.name === 'pattern')!;
+
+            expect(patternField.hasDefault).toBe(true);
+            expect(patternField.isServerDefault).toBe(false);
+        });
     });
 
     describe('relation detection', () => {
@@ -372,11 +384,13 @@ model User {
   name     String
   /// @bcm.password
   password String
+  role     String
 }`));
             const user = result.models[0];
             expect(user.isAuthModel).toBe(true);
             expect(user.identifierField).toBe('email');
             expect(user.passwordField).toBe('password');
+            expect(user.roleField).toBe('role');
         });
 
         it('@bcm.password implies writeOnly in field directives', () => {
@@ -404,6 +418,30 @@ model User {
             expect(user.isAuthModel).toBe(false);
             expect(user.identifierField).toBeUndefined();
             expect(user.passwordField).toBeUndefined();
+            expect(user.roleField).toBeUndefined();
+        });
+    });
+
+    describe('directive warnings aggregation', () => {
+        it('includes parser warnings in ParsedSchema.warnings', () => {
+            const result = parsePrismaAst(schema(`
+model User {
+  /// @bcm.hidden
+  /// @bcm.writeOnly
+  email String
+}`));
+            expect(result.warnings.length).toBeGreaterThan(0);
+            expect(result.warnings[0]).toContain('conflicting directives');
+        });
+
+        it('warns when a required field is marked @bcm.hidden', () => {
+            const result = parsePrismaAst(schema(`
+model Insurance {
+  id String @id
+  /// @bcm.hidden
+  policyNumber String
+}`));
+            expect(result.warnings.some((w) => w.includes('required but marked @bcm.hidden'))).toBe(true);
         });
     });
 
@@ -461,6 +499,48 @@ model Post {
             const authorField = post.fields.find(f => f.name === 'author')!;
             expect(authorField.isRelation).toBe(true);
             expect(authorField.relationModel).toBe('User');
+        });
+    });
+
+    describe('model selectors', () => {
+        it('captures scalar @id and @unique selectors', () => {
+            const result = parsePrismaAst(schema(`
+model User {
+  id    String @id
+  email String @unique
+}`));
+            const user = result.models[0];
+            expect(user.selectors).toEqual([
+                { kind: 'id', fields: ['id'] },
+                { kind: 'unique', fields: ['email'] },
+            ]);
+        });
+
+        it('captures composite @@id and @@unique selectors with prisma key and db constraint metadata', () => {
+            const result = parsePrismaAst(schema(`
+model Membership {
+  orgId  String
+  userId String
+  scope  String
+
+  @@id([orgId, userId], name: "membership_key", map: "membership_pk")
+  @@unique([orgId, scope], name: "membership_scope_key", map: "membership_scope_unique")
+}`));
+            const model = result.models[0];
+            expect(model.selectors).toEqual([
+                {
+                    kind: 'id',
+                    fields: ['orgId', 'userId'],
+                    prismaKey: 'membership_key',
+                    constraintName: 'membership_pk',
+                },
+                {
+                    kind: 'unique',
+                    fields: ['orgId', 'scope'],
+                    prismaKey: 'membership_scope_key',
+                    constraintName: 'membership_scope_unique',
+                },
+            ]);
         });
     });
 });

@@ -1,6 +1,6 @@
 // Example 4: User Profiles
 // Complexity: Three models with one-to-one relations
-// Demonstrates: one-to-one relations, @bcm.hidden, @bcm.writeOnly
+// Demonstrates: one-to-one relations, @bcm.hidden, @bcm.writeOnly, @bcm.readonly
 
 datasource db {
   provider = "postgresql"
@@ -20,6 +20,8 @@ model User {
   settings  Setting?
   /// @bcm.readonly
   createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 model Profile {

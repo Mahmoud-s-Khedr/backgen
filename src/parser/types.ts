@@ -13,12 +13,15 @@ export interface ParsedSchema {
     models: ModelDefinition[];
     enums: EnumDefinition[];
     datasource: DatasourceConfig;
+    warnings: string[];
 }
 
 /** A single Prisma model with all its metadata */
 export interface ModelDefinition {
     name: string;
     fields: FieldDefinition[];
+    /** Model-level unique/primary selectors used for item CRUD generation */
+    selectors?: ModelSelectorDefinition[];
     directives: ModelDirective[];
     authRoles?: string[];
     /** True if this model is marked @bcm.authModel (used for login) */
@@ -27,6 +30,27 @@ export interface ModelDefinition {
     identifierField?: string;
     /** Field name marked @bcm.password (login password; implies writeOnly) */
     passwordField?: string;
+    /** Scalar field name used for JWT role claim (required for @bcm.auth RBAC models) */
+    roleField?: string;
+}
+
+/** A model selector that can uniquely identify a single record */
+export interface ModelSelectorDefinition {
+    /** Primary key selector has higher precedence than non-primary unique selectors */
+    kind: 'id' | 'unique';
+    /** Selector field order (important for composite selectors and route param order) */
+    fields: string[];
+    /**
+     * Prisma client selector key for composite selectors.
+     * Uses explicit `name:` when provided; otherwise falls back to joined fields.
+     * Example: @@id([userId, listingId], name: "favoriteKey") => favoriteKey
+     */
+    prismaKey?: string;
+    /**
+     * Optional explicit DB constraint name from Prisma schema `map:` argument.
+     * Kept for reference/debugging.
+     */
+    constraintName?: string;
 }
 
 /** A single field within a model */
@@ -79,6 +103,7 @@ export interface GenerateOptions {
     dryRun: boolean;
     only?: string;
     force: boolean;
+    json?: boolean;
 }
 
 /** A single file to be written by the generator */

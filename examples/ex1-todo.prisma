@@ -20,4 +20,6 @@ model Todo {
   createdAt   DateTime @default(now())
   /// @bcm.readonly
   updatedAt   DateTime @updatedAt
+
+  @@index([completed, createdAt])
 }

@@ -1,0 +1,40 @@
+# backgen CLI JSON proof sample
+
+Command:
+node dist/generator/cli.js generate --schema <tmp>/schema.prisma --output <tmp>/out --dry-run --force --json
+
+Summary JSON:
+{
+  "success": true,
+  "modelCount": 1,
+  "enumCount": 0,
+  "fileCount": 30,
+  "endpointCount": 6,
+  "generatedAt": "2026-02-23T18:39:42.269Z",
+  "sampleFiles": [
+    {
+      "path": "src/modules/user/user.controller.ts",
+      "sizeBytes": 5925
+    },
+    {
+      "path": "src/modules/user/user.service.ts",
+      "sizeBytes": 3568
+    },
+    {
+      "path": "src/modules/user/user.routes.ts",
+      "sizeBytes": 879
+    },
+    {
+      "path": "src/modules/user/user.dto.ts",
+      "sizeBytes": 1560
+    },
+    {
+      "path": "src/modules/user/user.test.ts",
+      "sizeBytes": 3459
+    },
+    {
+      "path": "src/config/database.ts",
+      "sizeBytes": 394
+    }
+  ]
+}

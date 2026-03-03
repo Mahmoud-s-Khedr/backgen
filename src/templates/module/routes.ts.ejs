@@ -10,16 +10,22 @@ const controller = new <%= model.name %>Controller();
 <% const roleGuard = authRoles.length > 0 ? `, authorize(${authRoles.map(r => `'${r}'`).join(', ')})` : ''; %>
 
 router.get('/', (req, res, next) => controller.list(req, res, next));
-router.get('/:id', (req, res, next) => controller.getById(req, res, next));
+<% if (itemSelector) { -%>
+router.get('<%= itemPath %>', (req, res, next) => controller.getOne(req, res, next));
+<% } -%>
 <% if (isProtected) { %>
 router.post('/', authenticate<%- roleGuard %>, validate(Create<%= model.name %>Schema), (req, res, next) => controller.create(req, res, next));
-router.put('/:id', authenticate<%- roleGuard %>, validate(Update<%= model.name %>Schema), (req, res, next) => controller.update(req, res, next));
-router.patch('/:id', authenticate<%- roleGuard %>, validate(Patch<%= model.name %>Schema), (req, res, next) => controller.patch(req, res, next));
-router.delete('/:id', authenticate<%- roleGuard %>, (req, res, next) => controller.remove(req, res, next));
+<% if (itemSelector) { -%>
+router.put('<%= itemPath %>', authenticate<%- roleGuard %>, validate(Update<%= model.name %>Schema), (req, res, next) => controller.update(req, res, next));
+router.patch('<%= itemPath %>', authenticate<%- roleGuard %>, validate(Patch<%= model.name %>Schema), (req, res, next) => controller.patch(req, res, next));
+router.delete('<%= itemPath %>', authenticate<%- roleGuard %>, (req, res, next) => controller.remove(req, res, next));
+<% } -%>
 <% } else { %>
 router.post('/', validate(Create<%= model.name %>Schema), (req, res, next) => controller.create(req, res, next));
-router.put('/:id', validate(Update<%= model.name %>Schema), (req, res, next) => controller.update(req, res, next));
-router.patch('/:id', validate(Patch<%= model.name %>Schema), (req, res, next) => controller.patch(req, res, next));
-router.delete('/:id', (req, res, next) => controller.remove(req, res, next));
+<% if (itemSelector) { -%>
+router.put('<%= itemPath %>', validate(Update<%= model.name %>Schema), (req, res, next) => controller.update(req, res, next));
+router.patch('<%= itemPath %>', validate(Patch<%= model.name %>Schema), (req, res, next) => controller.patch(req, res, next));
+router.delete('<%= itemPath %>', (req, res, next) => controller.remove(req, res, next));
+<% } -%>
 <% } %>
 export { router as <%= h.toCamelCase(model.name) %>Routes };

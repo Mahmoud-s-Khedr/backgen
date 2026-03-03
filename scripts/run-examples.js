@@ -44,9 +44,10 @@ for (const schema of schemas) {
     { label: 'prisma migrate', cmd: () => run(
       provider === 'sqlite'
         ? 'npx prisma migrate dev --name init'
-        : 'npx prisma db push --accept-data-loss',
+        : 'npx prisma db push --force-reset',
       outputDir
     ) },
+    { label: 'npm run build',  cmd: () => run('npm run build', outputDir) },
   ];
 
   for (const step of steps) {

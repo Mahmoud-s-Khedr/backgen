@@ -44,6 +44,7 @@ program
         '--only <part>',
         'Generate only a specific part (routes, config, middleware, utils, app, infra, prisma, swagger)'
     )
+    .option('--json', 'Output machine-readable JSON only', false)
     .option('--force', 'Overwrite existing output directory', false)
     .action(generateCommand);
 

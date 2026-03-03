@@ -2,6 +2,7 @@ import { getSchema } from '@mrleebo/prisma-ast';
 import type {
     ParsedSchema,
     ModelDefinition,
+    ModelSelectorDefinition,
     FieldDefinition,
     EnumDefinition,
     DatasourceConfig,
@@ -12,7 +13,9 @@ import { PRISMA_SCALAR_TYPES } from '../generator/template-engine.js';
 
 /** Attribute node from @mrleebo/prisma-ast (e.g., @id, @unique, @default, @relation) */
 interface AstAttribute {
+    type?: string;
     name: string;
+    kind?: string;
     args?: AstArg[];
 }
 
@@ -28,6 +31,7 @@ type AstValue =
     | number
     | boolean
     | { type: 'function'; name: string; params?: string[] }
+    | { type: 'keyValue'; key?: string; value?: AstValue }
     | { type: 'array'; args?: Array<{ value?: string | number }> }
     | { type: string; [key: string]: unknown };
 
@@ -91,7 +95,37 @@ export function parsePrismaAst(schemaContent: string): ParsedSchema {
         }
     }
 
-    return { models, enums, datasource };
+    const warnings = [
+        ...Array.from(directivesMap.values()).flatMap((v) => v.warnings),
+        ...findHiddenRequiredFieldWarnings(models),
+    ];
+
+    return { models, enums, datasource, warnings };
+}
+
+function findHiddenRequiredFieldWarnings(models: ModelDefinition[]): string[] {
+    const warnings: string[] = [];
+
+    for (const model of models) {
+        for (const field of model.fields) {
+            // @bcm.hidden removes the field from all generated API input schemas.
+            // If the field is required by Prisma and has no default, create flows are unsatisfiable.
+            if (
+                field.directives.includes('hidden') &&
+                !field.isRelation &&
+                !field.isList &&
+                !field.isId &&
+                !field.isOptional &&
+                !field.hasDefault
+            ) {
+                warnings.push(
+                    `Model "${model.name}" field "${field.name}" is required but marked @bcm.hidden; API create/update inputs cannot provide it. Consider @bcm.writeOnly, making it optional (?), or adding a default.`
+                );
+            }
+        }
+    }
+
+    return warnings;
 }
 
 function parseModelBlock(
@@ -128,7 +162,7 @@ function parseModelBlock(
             : undefined;
         // Server-generated: @updatedAt or a function-call default like uuid(), now(), autoincrement()
         const isServerDefault = attributes.some((a) => a.name === 'updatedAt') ||
-            (defaultValue !== undefined && defaultValue.includes('('));
+            isFunctionDefault(defaultAttr);
 
         // Detect relations
         const relationAttr = attributes.find((a) => a.name === 'relation');
@@ -193,6 +227,11 @@ function parseModelBlock(
         });
     }
 
+    const modelAttributes = properties
+        .filter((p) => p.type === 'attribute')
+        .map((p) => p as unknown as AstAttribute);
+    const selectors = parseModelSelectors(fields, modelAttributes);
+
     const modelResult = directivesMap.get(modelName);
     const modelDirectives = modelResult?.modelDirectives ?? [];
     const isAuthModel = modelDirectives.includes('authModel');
@@ -202,16 +241,60 @@ function parseModelBlock(
     const passwordField = isAuthModel
         ? fields.find(f => f.directives.includes('password'))?.name
         : undefined;
+    const roleField = isAuthModel
+        ? fields.find(f => !f.isRelation && f.name === 'role')?.name
+        : undefined;
 
     return {
         name: modelName,
         fields,
+        selectors,
         directives: modelDirectives,
         authRoles: modelResult?.authRoles,
         isAuthModel,
         identifierField,
         passwordField,
+        roleField,
     };
+}
+
+function parseModelSelectors(fields: FieldDefinition[], modelAttributes: AstAttribute[]): ModelSelectorDefinition[] {
+    const selectors: ModelSelectorDefinition[] = [];
+
+    const scalarIdField = fields.find((f) => f.isId);
+    if (scalarIdField) {
+        selectors.push({
+            kind: 'id',
+            fields: [scalarIdField.name],
+        });
+    }
+
+    for (const attr of modelAttributes) {
+        if (!attr || attr.kind !== 'object') continue;
+        if (attr.name !== 'id' && attr.name !== 'unique') continue;
+        const fieldsArg = attr.args?.find((arg) => getArgKey(arg) === undefined);
+        const selectorFields = fieldsArg
+            ? (extractArrayArg(fieldsArg) || '').split(',').map((v) => v.trim()).filter(Boolean)
+            : [];
+        if (selectorFields.length === 0) continue;
+
+        selectors.push({
+            kind: attr.name === 'id' ? 'id' : 'unique',
+            fields: selectorFields,
+            prismaKey: extractNamedStringArg(attr, 'name') || selectorFields.join('_'),
+            constraintName: extractNamedStringArg(attr, 'map'),
+        });
+    }
+
+    const scalarUniqueFields = fields.filter((f) => f.isUnique && !f.isId);
+    for (const field of scalarUniqueFields) {
+        selectors.push({
+            kind: 'unique',
+            fields: [field.name],
+        });
+    }
+
+    return selectors;
 }
 
 function parseEnumBlock(block: AstBlock): EnumDefinition {
@@ -256,12 +339,51 @@ function isNonScalarType(type: string): boolean {
 function extractDefaultValue(attr: AstAttribute): string | undefined {
     const args: AstArg[] = attr.args || [];
     if (args.length === 0) return undefined;
-    const val = args[0]?.value;
+    const val = unwrapAstValue(args[0]?.value);
     if (typeof val === 'object' && val !== null && 'type' in val && val.type === 'function') {
         const fn = val as { type: 'function'; name: string };
         return `${fn.name}()`;
     }
     return String(val);
+}
+
+function isFunctionDefault(attr?: AstAttribute): boolean {
+    if (!attr) {
+        return false;
+    }
+    const value = unwrapAstValue(attr.args?.[0]?.value);
+    return typeof value === 'object' && value !== null && 'type' in value && value.type === 'function';
+}
+
+function unwrapAstValue(value: AstValue | undefined): AstValue | undefined {
+    if (
+        typeof value === 'object'
+        && value !== null
+        && 'type' in value
+        && value.type === 'keyValue'
+        && 'value' in value
+    ) {
+        return value.value as AstValue | undefined;
+    }
+    return value;
+}
+
+function getArgKey(arg: AstArg): string | undefined {
+    const argAny = arg as Record<string, unknown>;
+    const keyValue = argAny.value as { type?: string; key?: string } | undefined;
+    return arg.name || (keyValue?.type === 'keyValue' ? keyValue.key : undefined);
+}
+
+function extractNamedStringArg(attr: AstAttribute, key: string): string | undefined {
+    const args = attr.args || [];
+    for (const arg of args) {
+        if (getArgKey(arg) !== key) continue;
+        const argAny = arg as Record<string, unknown>;
+        const keyValue = argAny.value as { type?: string; value?: AstValue } | undefined;
+        const value = keyValue?.type === 'keyValue' ? keyValue.value : arg.value;
+        if (typeof value === 'string') return value.replace(/"/g, '');
+    }
+    return undefined;
 }
 
 function extractArrayArg(arg: AstArg): string | undefined {
