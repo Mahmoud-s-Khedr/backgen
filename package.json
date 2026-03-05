@@ -1,6 +1,6 @@
 {
   "name": "prisma-backgen",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Generate a complete, production-ready Express.js REST API backend from a Prisma schema file",
   "type": "module",
   "main": "./dist/generator/cli.js",
