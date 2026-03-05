@@ -4,17 +4,16 @@ import { renderTemplate } from '../template-engine.js';
 /**
  * Generate middleware files: error, auth, rate-limit, validation.
  */
-export function generateMiddlewareFiles(_schema: ParsedSchema): GeneratedFile[] {
+export function generateMiddlewareFiles(schema: ParsedSchema): GeneratedFile[] {
+    const hasAnyAuth = schema.models.some(
+        (m) => m.isAuthModel || m.directives.includes('protected') || m.directives.includes('auth')
+    );
     const data = {};
 
-    return [
+    const files: GeneratedFile[] = [
         {
             path: 'src/middlewares/error.middleware.ts',
             content: renderTemplate('middleware/error.middleware.ts.ejs', data),
-        },
-        {
-            path: 'src/middlewares/auth.middleware.ts',
-            content: renderTemplate('middleware/auth.middleware.ts.ejs', data),
         },
         {
             path: 'src/middlewares/rate-limit.middleware.ts',
@@ -25,4 +24,13 @@ export function generateMiddlewareFiles(_schema: ParsedSchema): GeneratedFile[] 
             content: renderTemplate('middleware/validation.middleware.ts.ejs', data),
         },
     ];
+
+    if (hasAnyAuth) {
+        files.push({
+            path: 'src/middlewares/auth.middleware.ts',
+            content: renderTemplate('middleware/auth.middleware.ts.ejs', data),
+        });
+    }
+
+    return files;
 }

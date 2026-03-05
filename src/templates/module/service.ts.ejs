@@ -120,33 +120,21 @@ export class <%= model.name %>Service {
    * Create a new <%= h.toCamelCase(model.name) %>.
    */
   async create(data: Create<%= model.name %>Input): Promise<<%= model.name %>> {
-    try {
 <% if (model.isAuthModel && model.passwordField) { -%>
-      const createData = { ...data };
-      if (typeof createData.<%= model.passwordField %> === 'string') {
-        createData.<%= model.passwordField %> = await bcrypt.hash(createData.<%= model.passwordField %>, 12);
-      }
+    const createData = { ...data };
+    if (typeof createData.<%= model.passwordField %> === 'string') {
+      createData.<%= model.passwordField %> = await bcrypt.hash(createData.<%= model.passwordField %>, 12);
+    }
 <% } -%>
 <% if (nestedRelations.length > 0) { -%>
-      const createPayload = <%= model.isAuthModel && model.passwordField ? 'createData' : 'data' %> as any;
-      return await prisma.<%= h.toCamelCase(model.name) %>.create({
-        data: createPayload,
-        include: { <%= nestedRelations.map(nr => nr.name + ': true').join(', ') %> },
-      });
+    const createPayload = <%= model.isAuthModel && model.passwordField ? 'createData' : 'data' %> as any;
+    return await prisma.<%= h.toCamelCase(model.name) %>.create({
+      data: createPayload,
+      include: { <%= nestedRelations.map(nr => nr.name + ': true').join(', ') %> },
+    });
 <% } else { -%>
-      return await prisma.<%= h.toCamelCase(model.name) %>.create({ data: <%= model.isAuthModel && model.passwordField ? 'createData' : 'data' %> });
+    return await prisma.<%= h.toCamelCase(model.name) %>.create({ data: <%= model.isAuthModel && model.passwordField ? 'createData' : 'data' %> });
 <% } -%>
-    } catch (error: unknown) {
-      if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2002') {
-        throw new ProblemDetail({
-          type: 'unique-constraint',
-          title: 'Unique Constraint Violation',
-          status: 409,
-          detail: `A <%= h.toCamelCase(model.name) %> with this value already exists.`,
-        });
-      }
-      throw error;
-    }
   }
 
 <% if (itemSelector) { -%>
@@ -219,24 +207,13 @@ export class <%= model.name %>Service {
 <% } -%>
 <% } -%>
     } catch (error: unknown) {
-      if (typeof error === 'object' && error !== null && 'code' in error) {
-        const code = (error as { code: string }).code;
-        if (code === 'P2025') {
-          throw new ProblemDetail({
-            type: 'not-found',
-            title: 'Not Found',
-            status: 404,
-            detail: `<%= model.name %> with key "${this.keyDescription(key)}" not found.`,
-          });
-        }
-        if (code === 'P2002') {
-          throw new ProblemDetail({
-            type: 'unique-constraint',
-            title: 'Unique Constraint Violation',
-            status: 409,
-            detail: `A <%= h.toCamelCase(model.name) %> with this value already exists.`,
-          });
-        }
+      if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2025') {
+        throw new ProblemDetail({
+          type: 'not-found',
+          title: 'Not Found',
+          status: 404,
+          detail: `<%= model.name %> with key "${this.keyDescription(key)}" not found.`,
+        });
       }
       throw error;
     }

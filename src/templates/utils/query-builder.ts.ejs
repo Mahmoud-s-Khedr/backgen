@@ -112,12 +112,9 @@ export function buildQueryOptions(
   // Sorting — validate sort field against allowed fields; use model fallback when provided.
   const requestedSort = typeof query.sort === 'string' ? query.sort : undefined;
   let sortField: string | undefined;
-  if (requestedSort && (allowedFilterFields.length === 0 || allowedFilterFields.includes(requestedSort))) {
+  if (requestedSort && allowedFilterFields.includes(requestedSort)) {
     sortField = requestedSort;
-  } else if (
-    defaultSortField &&
-    (allowedFilterFields.length === 0 || allowedFilterFields.includes(defaultSortField))
-  ) {
+  } else if (defaultSortField && allowedFilterFields.includes(defaultSortField)) {
     sortField = defaultSortField;
   }
   const order = query.order === 'asc' ? 'asc' : 'desc';

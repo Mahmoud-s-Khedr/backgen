@@ -80,7 +80,10 @@ export function generateModuleFiles(schema: ParsedSchema): GeneratedFile[] {
             (f) => !f.directives.includes('hidden') && !f.directives.includes('writeOnly')
         );
         const responseFields = scalarFields.filter(
-            (f) => !f.directives.includes('hidden') && !f.directives.includes('writeOnly')
+            (f) =>
+                !f.directives.includes('hidden') &&
+                !f.directives.includes('writeOnly') &&
+                !f.directives.includes('password')
         );
         const fkFields = model.fields
             .map((f) => f.relationField)
