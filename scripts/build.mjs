@@ -26,7 +26,7 @@ await build({
     outfile: path.join(distGeneratorDir, 'cli.js'),
     format: 'esm',
     banner: {
-        js: "#!/usr/bin/env node\nimport{createRequire}from'module';const require=createRequire(import.meta.url);",
+        js: "import{createRequire}from'module';const require=createRequire(import.meta.url);",
     },
 });
 
