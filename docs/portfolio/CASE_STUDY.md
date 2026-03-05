@@ -60,8 +60,3 @@ Core strategy:
 2. Add e2e golden-file regression tests for major schema patterns.
 3. Add authenticated/tenant-aware generation profiles.
 4. Publish a hosted public demo URL with rate-limit telemetry dashboard.
-
-## 8) Arabic Summary (ملخص عربي)
-مشروع **Backgen** يحول مخطط Prisma إلى Backend جاهز للإنتاج بشكل تلقائي (Express + TypeScript + Validation + Swagger + Infra).  
-التركيز الأساسي كان على جودة التوليد، الاتساق بين CLI والـ Playground، والـ fail-fast validation لتقليل أخطاء runtime.  
-المشروع مناسب كبروفايل **Backend Engineering** لأنه يجمع بين parsing، code generation، API architecture، وعمليات التشغيل.

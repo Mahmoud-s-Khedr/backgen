@@ -108,25 +108,11 @@ Evidence-backed signals from this repository:
 
 - [Usage Guide](docs/USAGE.md) — installation, CLI reference, directive reference, generated project structure
 
-## Portfolio Docs
-
-- [Documentation index](docs/README.md)
-- [Case study](docs/portfolio/CASE_STUDY.md)
-- [CV bullets](docs/portfolio/CV_BULLETS.md)
-- [Deployment blueprint (Render)](docs/portfolio/DEPLOYMENT.md)
-
 ## About the Author
 
 **Mahmoud Khedr**
 
 - GitHub: [Mahmoud-s-Khedr](https://github.com/Mahmoud-s-Khedr)
-
-## Arabic Summary (ملخص عربي)
-
-**Backgen** هو مشروع DevTool/Backend Engineering يحول مخطط Prisma إلى Backend جاهز للإنتاج بشكل تلقائي.  
-يعتمد على parsing + code generation + validation مع دعم selectors مركبة وnested relations.  
-الـ Playground يستخدم نفس CLI الفعلي لضمان الاتساق بين الواجهة والأداة.  
-هذا المستودع تم تنظيمه ليكون مناسبًا للـ CV والـ portfolio مع أدلة تشغيل واختبارات ووثائق حالة دراسية.
 
 ## License
 
