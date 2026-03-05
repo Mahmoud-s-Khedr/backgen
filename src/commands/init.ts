@@ -41,7 +41,7 @@ export async function initCommand(projectName: string): Promise<void> {
                 dev: 'tsx watch src/server.ts',
                 build: 'tsc',
                 start: 'node dist/server.js',
-                test: 'jest',
+                test: 'vitest run',
                 migrate: 'prisma migrate dev',
                 seed: 'tsx prisma/seed.ts',
                 studio: 'prisma studio',
