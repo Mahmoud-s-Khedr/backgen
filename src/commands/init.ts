@@ -80,7 +80,7 @@ export async function initCommand(projectName: string): Promise<void> {
 // Learn more: https://pris.ly/d/prisma-schema
 //
 // After editing, run:
-//   bcm generate --schema ./prisma/schema.prisma --output .
+//   bcm generate --schema ./prisma/schema.prisma --output . --force
 
 datasource db {
   provider = "postgresql"
@@ -132,7 +132,7 @@ dist/
             `  ${chalk.gray('2.')} Edit ${chalk.bold('prisma/schema.prisma')} with your models`
         );
         console.log(
-            `  ${chalk.gray('3.')} bcm generate --schema ./prisma/schema.prisma --output .`
+            `  ${chalk.gray('3.')} bcm generate --schema ./prisma/schema.prisma --output . --force`
         );
         console.log(`  ${chalk.gray('4.')} npm install`);
         console.log(`  ${chalk.gray('5.')} npx prisma migrate dev --name init`);

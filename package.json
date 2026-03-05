@@ -1,11 +1,12 @@
 {
-  "name": "backend-creator",
-  "version": "1.0.0",
+  "name": "prisma-backgen",
+  "version": "1.0.1",
   "description": "Generate a complete, production-ready Express.js REST API backend from a Prisma schema file",
   "type": "module",
   "main": "./dist/generator/cli.js",
   "bin": {
-    "bcm": "./dist/generator/cli.js"
+    "bcm": "./dist/generator/cli.js",
+    "prisma-backgen": "./dist/generator/cli.js"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -59,7 +60,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Mahmoud-s-Khedr/backgen.git"
+    "url": "git+https://github.com/Mahmoud-s-Khedr/backgen.git"
   },
   "homepage": "https://github.com/Mahmoud-s-Khedr/backgen",
   "bugs": {

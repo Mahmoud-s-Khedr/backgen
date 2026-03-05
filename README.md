@@ -2,6 +2,7 @@
 
 > Prisma-to-Backend code generation tool by **Mahmoud Khedr**.
 
+[![npm](https://img.shields.io/npm/v/prisma-backgen)](https://www.npmjs.com/package/prisma-backgen)
 [![CI](https://github.com/Mahmoud-s-Khedr/backgen/actions/workflows/ci.yml/badge.svg)](https://github.com/Mahmoud-s-Khedr/backgen/actions/workflows/ci.yml)
 [![Playground CI](https://github.com/Mahmoud-s-Khedr/backgen/actions/workflows/playground.yml/badge.svg)](https://github.com/Mahmoud-s-Khedr/backgen/actions/workflows/playground.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -47,7 +48,7 @@ When teams start from a Prisma schema, they still spend significant time buildin
 
 ### CLI
 ```bash
-npm install -g backend-creator
+npm install -g prisma-backgen
 
 bcm init my-api
 cd my-api
@@ -102,6 +103,10 @@ Evidence-backed signals from this repository:
   - `scripts/run-examples.js`
 - Supported providers in generation templates/config:
   - PostgreSQL, MySQL, SQLite, MongoDB
+
+## Documentation
+
+- [Usage Guide](docs/USAGE.md) — installation, CLI reference, directive reference, generated project structure
 
 ## Portfolio Docs
 

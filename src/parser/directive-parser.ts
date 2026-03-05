@@ -75,7 +75,7 @@ export function parseDirectives(
     let pendingFieldDirectives: FieldDirective[] = [];
     let pendingModelDirectives: ModelDirective[] = [];
     let pendingAuthRoles: string[] = [];
-    let pendingWarnings: string[] = [];
+    let pendingWarnings: string[] = []; // Warnings collected outside model blocks.
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -85,22 +85,18 @@ export function parseDirectives(
         const modelMatch = line.match(/^model\s+(\w+)\s*\{/);
         if (modelMatch) {
             currentModel = modelMatch[1];
-            if (!results.has(currentModel)) {
-                results.set(currentModel, {
-                    modelName: currentModel,
-                    modelDirectives: [...pendingModelDirectives],
-                    authRoles: pendingAuthRoles.length > 0 ? [...pendingAuthRoles] : undefined,
-                    fields: new Map(),
-                    warnings: [...pendingWarnings],
-                });
-            } else {
-                const result = results.get(currentModel)!;
-                result.modelDirectives.push(...pendingModelDirectives);
-                if (pendingAuthRoles.length > 0) {
-                    result.authRoles = [...pendingAuthRoles];
-                }
-                result.warnings.push(...pendingWarnings);
+            const result: ModelDirectivesResult = results.get(currentModel) ?? {
+                modelName: currentModel,
+                modelDirectives: [],
+                fields: new Map(),
+                warnings: [],
+            };
+            result.modelDirectives.push(...pendingModelDirectives);
+            if (pendingAuthRoles.length > 0) {
+                result.authRoles = [...pendingAuthRoles];
             }
+            result.warnings.push(...pendingWarnings);
+            results.set(currentModel, result);
             pendingFieldDirectives = [];
             pendingModelDirectives = [];
             pendingAuthRoles = [];
@@ -108,10 +104,10 @@ export function parseDirectives(
             continue;
         }
 
-        // Detect block end
-        if (line === '}') {
+        // Detect model block end
+        if (line === '}' && currentModel) {
             // Flush any straggling field directives that weren't attached to a field
-            if (pendingFieldDirectives.length > 0 && currentModel) {
+            if (pendingFieldDirectives.length > 0) {
                 const result = results.get(currentModel)!;
                 result.warnings.push(
                     `Line ${lineNum}: Found @bcm directives without a following field declaration`
@@ -119,9 +115,6 @@ export function parseDirectives(
             }
             currentModel = null;
             pendingFieldDirectives = [];
-            pendingModelDirectives = [];
-            pendingAuthRoles = [];
-            pendingWarnings = [];
             continue;
         }
 
@@ -134,7 +127,8 @@ export function parseDirectives(
             if (VALID_MODEL_DIRECTIVES.has(directiveName)) {
                 if (currentModel) {
                     // Model directive inside a model block — warn and skip
-                    pendingWarnings.push(
+                    const result = results.get(currentModel)!;
+                    result.warnings.push(
                         `Line ${lineNum}: @bcm.${directiveName} is a model-level directive; place it before the model declaration`
                     );
                 } else {
@@ -159,9 +153,12 @@ export function parseDirectives(
             }
 
             // Unknown directive
-            pendingWarnings.push(
-                `Line ${lineNum}: Unknown directive @bcm.${directiveName}`
-            );
+            if (currentModel) {
+                const result = results.get(currentModel)!;
+                result.warnings.push(`Line ${lineNum}: Unknown directive @bcm.${directiveName}`);
+            } else {
+                pendingWarnings.push(`Line ${lineNum}: Unknown directive @bcm.${directiveName}`);
+            }
             continue;
         }
 
@@ -172,26 +169,31 @@ export function parseDirectives(
         if (!currentModel) continue;
 
         const fieldMatch = line.match(/^(\w+)\s+/);
-        if (fieldMatch && pendingFieldDirectives.length > 0) {
-            const fieldName = fieldMatch[1];
-            const result = results.get(currentModel)!;
+        if (fieldMatch) {
+            if (pendingFieldDirectives.length > 0) {
+                const fieldName = fieldMatch[1];
+                const result = results.get(currentModel)!;
 
-            // Check for conflicting directives
-            for (const [a, b] of CONFLICTING_PAIRS) {
-                if (pendingFieldDirectives.includes(a) && pendingFieldDirectives.includes(b)) {
-                    result.warnings.push(
-                        `Line ${lineNum}: Field "${fieldName}" has conflicting directives @bcm.${a} and @bcm.${b}`
-                    );
+                // Check for conflicting directives
+                for (const [a, b] of CONFLICTING_PAIRS) {
+                    if (pendingFieldDirectives.includes(a) && pendingFieldDirectives.includes(b)) {
+                        result.warnings.push(
+                            `Line ${lineNum}: Field "${fieldName}" has conflicting directives @bcm.${a} and @bcm.${b}`
+                        );
+                    }
                 }
+
+                result.fields.set(fieldName, [...pendingFieldDirectives]);
             }
-
-            result.fields.set(fieldName, [...pendingFieldDirectives]);
-            result.warnings.push(...pendingWarnings);
+            pendingFieldDirectives = [];
         }
+    }
 
-        // Reset pending for next field
-        pendingFieldDirectives = [];
-        pendingWarnings = [];
+    if (currentModel && pendingFieldDirectives.length > 0) {
+        const result = results.get(currentModel);
+        result?.warnings.push(
+            `Line ${lines.length}: Found @bcm directives without a following field declaration`
+        );
     }
 
     return results;

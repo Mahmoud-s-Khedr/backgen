@@ -362,6 +362,19 @@ model Hub {
             expect(postService.content).toContain('where: { ...this.toWhereUnique(key), deletedAt: null }');
         });
 
+        it('service.ts guards soft-delete update/delete mutations with deletedAt null', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
+            const postService = files.find(f => f.path.includes('post.service.ts'))!;
+
+            expect(postService.content).toContain('updateMany({ where, data: data as any })');
+            expect(postService.content).toContain('const where = { ...this.toWhereUnique(key), deletedAt: null };');
+            expect(postService.content).toContain('if (updated.count === 0)');
+            expect(postService.content).toContain('const record = await prisma.post.findFirst({ where });');
+            expect(postService.content).toContain('const deleted = await prisma.post.updateMany({');
+            expect(postService.content).toContain('if (deleted.count === 0)');
+        });
+
         it('service.ts uses findUnique for non-softDelete findOne', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
@@ -1802,6 +1815,75 @@ model Post {
 
             expect(seed.content).toContain('type ParentId = string | number | bigint | Date;');
             expect(seed.content).not.toContain('Record<string, string[]>');
+        });
+
+        it('orders seed creation using relation metadata when FK naming is non-conventional', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Child {
+  id       String @id @default(cuid())
+  parentFk String
+  parent   Parent @relation(fields: [parentFk], references: [id])
+}
+
+model Parent {
+  id String @id @default(cuid())
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'prisma' }, raw);
+            const seed = files.find(f => f.path === 'prisma/seed.ts')!;
+
+            const childCreateIndex = seed.content.indexOf('await prisma.child.create(');
+            const parentCreateIndex = seed.content.indexOf('await prisma.parent.create(');
+            expect(parentCreateIndex).toBeGreaterThan(-1);
+            expect(childCreateIndex).toBeGreaterThan(-1);
+            expect(parentCreateIndex).toBeLessThan(childCreateIndex);
+        });
+
+        it('orders seed creation for composite custom FK relations', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Locale {
+  code   String
+  region String
+  books  Book[]
+
+  @@id([code, region], name: "localeKey")
+}
+
+model Book {
+  id           String @id @default(cuid())
+  localeCode   String
+  localeRegion String
+  locale       Locale @relation(fields: [localeCode, localeRegion], references: [code, region])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'prisma' }, raw);
+            const seed = files.find(f => f.path === 'prisma/seed.ts')!;
+
+            const localeCreateIndex = seed.content.indexOf('await prisma.locale.create(');
+            const bookCreateIndex = seed.content.indexOf('await prisma.book.create(');
+            expect(localeCreateIndex).toBeGreaterThan(-1);
+            expect(bookCreateIndex).toBeGreaterThan(-1);
+            expect(localeCreateIndex).toBeLessThan(bookCreateIndex);
         });
 
         it('emits wildcard-safe CORS credentials behavior and sqlite data path aligned with schema-relative resolution', async () => {

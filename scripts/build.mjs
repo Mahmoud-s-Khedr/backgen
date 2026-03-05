@@ -2,6 +2,7 @@ import { build } from 'esbuild';
 import fs from 'fs-extra';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { chmodSync } from 'node:fs';
 
 const scriptDir = typeof import.meta.dirname === 'string'
     ? import.meta.dirname
@@ -25,7 +26,7 @@ await build({
     outfile: path.join(distGeneratorDir, 'cli.js'),
     format: 'esm',
     banner: {
-        js: "import{createRequire}from'module';const require=createRequire(import.meta.url);",
+        js: "#!/usr/bin/env node\nimport{createRequire}from'module';const require=createRequire(import.meta.url);",
     },
 });
 
@@ -33,3 +34,5 @@ await fs.copy(sourceTemplatesDir, distTemplatesDir);
 
 const packageJson = await fs.readJson(packageJsonPath);
 await fs.writeJson(distPackageJsonPath, packageJson, { spaces: 2 });
+
+chmodSync(path.join(distGeneratorDir, 'cli.js'), 0o755);

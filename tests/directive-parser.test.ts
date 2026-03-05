@@ -43,9 +43,6 @@ model Post {
     });
 
     it('warns when model directive is placed inside model block', () => {
-        // A model-level directive inside a block triggers a warning in pendingWarnings.
-        // pendingWarnings only flush when a field has pending field directives too,
-        // so we pair it with a field directive to ensure the warning is captured.
         const schema = `
 model Post {
   id String @id
@@ -74,8 +71,6 @@ model User {
     });
 
     it('warns about unknown directives', () => {
-        // Unknown directive warnings go to pendingWarnings, which only flush when
-        // there are pending field directives too. We pair with a valid directive.
         const schema = `
 model User {
   id String @id
@@ -86,6 +81,29 @@ model User {
         const result = parseDirectives(schema);
         const user = result.get('User')!;
         expect(user.warnings.some(w => w.includes('Unknown directive'))).toBe(true);
+    });
+
+    it('warns about unknown directives inside model blocks even without paired field directives', () => {
+        const schema = `
+model User {
+  id String @id
+  /// @bcm.unknownDirective
+  name String
+}`;
+        const result = parseDirectives(schema);
+        const user = result.get('User')!;
+        expect(user.warnings.some(w => w.includes('Unknown directive'))).toBe(true);
+    });
+
+    it('warns about misplaced model directives inside model blocks even without paired field directives', () => {
+        const schema = `
+model User {
+  id String @id
+  /// @bcm.protected
+}`;
+        const result = parseDirectives(schema);
+        const user = result.get('User')!;
+        expect(user.warnings.some(w => w.includes('model-level directive'))).toBe(true);
     });
 
     it('detects conflicting directives: hidden + writeOnly', () => {

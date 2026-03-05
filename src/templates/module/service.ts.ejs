@@ -160,16 +160,62 @@ export class <%= model.name %>Service {
       if (typeof updateData.<%= model.passwordField %> === 'string') {
         updateData.<%= model.passwordField %> = await bcrypt.hash(updateData.<%= model.passwordField %>, 12);
       }
+<% if (isSoftDelete) { -%>
+      const where = { ...this.toWhereUnique(key), deletedAt: null };
+      const updated = await prisma.<%= h.toCamelCase(model.name) %>.updateMany({ where, data: updateData as any });
+      if (updated.count === 0) {
+        throw new ProblemDetail({
+          type: 'not-found',
+          title: 'Not Found',
+          status: 404,
+          detail: `<%= model.name %> with key "${this.keyDescription(key)}" not found.`,
+        });
+      }
+      const record = await prisma.<%= h.toCamelCase(model.name) %>.findFirst({ where });
+      if (!record) {
+        throw new ProblemDetail({
+          type: 'not-found',
+          title: 'Not Found',
+          status: 404,
+          detail: `<%= model.name %> with key "${this.keyDescription(key)}" not found.`,
+        });
+      }
+      return record;
+<% } else { -%>
 <% if (nestedRelations.length > 0) { -%>
       return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: this.toWhereUnique(key), data: updateData as any });
 <% } else { -%>
       return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: this.toWhereUnique(key), data: updateData });
 <% } -%>
+<% } -%>
+<% } else { -%>
+<% if (isSoftDelete) { -%>
+      const where = { ...this.toWhereUnique(key), deletedAt: null };
+      const updated = await prisma.<%= h.toCamelCase(model.name) %>.updateMany({ where, data: data as any });
+      if (updated.count === 0) {
+        throw new ProblemDetail({
+          type: 'not-found',
+          title: 'Not Found',
+          status: 404,
+          detail: `<%= model.name %> with key "${this.keyDescription(key)}" not found.`,
+        });
+      }
+      const record = await prisma.<%= h.toCamelCase(model.name) %>.findFirst({ where });
+      if (!record) {
+        throw new ProblemDetail({
+          type: 'not-found',
+          title: 'Not Found',
+          status: 404,
+          detail: `<%= model.name %> with key "${this.keyDescription(key)}" not found.`,
+        });
+      }
+      return record;
 <% } else { -%>
 <% if (nestedRelations.length > 0) { -%>
       return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: this.toWhereUnique(key), data: data as any });
 <% } else { -%>
       return await prisma.<%= h.toCamelCase(model.name) %>.update({ where: this.toWhereUnique(key), data });
+<% } -%>
 <% } -%>
 <% } -%>
     } catch (error: unknown) {
@@ -202,10 +248,18 @@ export class <%= model.name %>Service {
   async delete(key: <%= model.name %>Key): Promise<void> {
     try {
 <% if (isSoftDelete) { %>
-      await prisma.<%= h.toCamelCase(model.name) %>.update({
-        where: this.toWhereUnique(key),
+      const deleted = await prisma.<%= h.toCamelCase(model.name) %>.updateMany({
+        where: { ...this.toWhereUnique(key), deletedAt: null },
         data: { deletedAt: new Date() },
       });
+      if (deleted.count === 0) {
+        throw new ProblemDetail({
+          type: 'not-found',
+          title: 'Not Found',
+          status: 404,
+          detail: `<%= model.name %> with key "${this.keyDescription(key)}" not found.`,
+        });
+      }
 <% } else { %>
       await prisma.<%= h.toCamelCase(model.name) %>.delete({ where: this.toWhereUnique(key) });
 <% } %>

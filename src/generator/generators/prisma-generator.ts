@@ -1,4 +1,3 @@
-import { readFileSync } from 'fs';
 import type { ParsedSchema, ModelDefinition, EnumDefinition, GeneratedFile } from '../../parser/types.js';
 import { renderTemplate } from '../template-engine.js';
 
@@ -9,15 +8,24 @@ const BCM_DIRECTIVE_REGEX = /^\s*\/\/\/\s*@bcm\.\w+.*\n?/gm;
  * FK dependencies are seeded first (parent rows before child rows).
  *
  * A model M depends on N when M has a non-list, non-enum relation object
- * field whose companion scalar `<rel.name>Id` exists in M's fields and
- * the relation points to model N. Cycle members are appended in original
+ * field with relation metadata (`@relation(fields: [...])`) that points to
+ * model N and all referenced local FK scalar fields exist in M.
+ * Cycle members are appended in original
  * order at the end (Kahn's algorithm graceful degradation).
  */
+function relationFieldNames(relationField?: string): string[] {
+    if (!relationField) {
+        return [];
+    }
+    return relationField.split(',').map((field) => field.trim()).filter(Boolean);
+}
+
 function topoSortModels(
     models: ModelDefinition[],
     _enums: EnumDefinition[]
 ): ModelDefinition[] {
     const modelNames = new Set(models.map((m) => m.name));
+    const dependencyEdges = new Set<string>();
 
     // adj[N] = [M, ...] means M depends on N (N must come first)
     const adj = new Map<string, string[]>(models.map((m) => [m.name, []]));
@@ -27,10 +35,16 @@ function topoSortModels(
         for (const f of m.fields) {
             // Only consider non-list, non-enum relation object fields
             if (!f.isRelation || f.isList || f.isEnum || f.type === m.name) continue;
-            // The relation must have a companion FK scalar field (e.g., authorId for author)
-            const fkName = f.name + 'Id';
-            if (!m.fields.some((sf) => sf.name === fkName && !sf.isRelation)) continue;
             if (!modelNames.has(f.type)) continue;
+            const fkNames = relationFieldNames(f.relationField);
+            if (fkNames.length === 0) continue;
+            const hasAllLocalScalarFks = fkNames.every(
+                (fkName) => m.fields.some((sf) => sf.name === fkName && !sf.isRelation)
+            );
+            if (!hasAllLocalScalarFks) continue;
+            const edgeKey = `${f.type}->${m.name}`;
+            if (dependencyEdges.has(edgeKey)) continue;
+            dependencyEdges.add(edgeKey);
             // m depends on f.type → f.type comes before m
             adj.get(f.type)!.push(m.name);
             inDeg.set(m.name, (inDeg.get(m.name) ?? 0) + 1);
