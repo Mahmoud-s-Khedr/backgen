@@ -83,6 +83,10 @@ function getParsedSchema(): ParsedSchema {
     return parsePrismaAst(BLOG_SCHEMA);
 }
 
+function readFixture(name: string): string {
+    return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
+}
+
 describe('generateProject', () => {
     describe('full generation (no --only)', () => {
         it('generates files for all 8 generators', async () => {
@@ -384,6 +388,29 @@ model Hub {
             expect(userService.content).toContain('where: this.toWhereUnique(key)');
         });
 
+        it('softDelete module test scaffold includes updateMany delegate and missing-record mocks', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
+            const postTest = files.find(f => f.path.includes('post.test.ts'))!;
+
+            expect(postTest.content).toContain('updateMany: ReturnType<typeof vi.fn>;');
+            expect(postTest.content).toContain('updateMany: vi.fn(),');
+            expect(postTest.content).toContain('delegate.updateMany.mockReset();');
+            expect(postTest.content).toContain('modelDelegate.updateMany.mockResolvedValue({ count: 0 });');
+            expect(postTest.content).not.toContain("modelDelegate.update.mockRejectedValue({ code: 'P2025' });");
+        });
+
+        it('non-softDelete module test scaffold keeps update/delete P2025 mocks', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
+            const userTest = files.find(f => f.path.includes('user.test.ts'))!;
+
+            expect(userTest.content).toContain("modelDelegate.update.mockRejectedValue({ code: 'P2025' });");
+            expect(userTest.content).toContain("modelDelegate.delete.mockRejectedValue({ code: 'P2025' });");
+            expect(userTest.content).toContain('updateMany: ReturnType<typeof vi.fn>;');
+            expect(userTest.content).toContain('updateMany: vi.fn(),');
+        });
+
         it('service.ts normalizes include objects without @ts-ignore', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
@@ -488,8 +515,19 @@ model EventLog {
             expect(pkg.dependencies).toHaveProperty('zod');
             expect(pkg.dependencies).toHaveProperty('pino');
             expect(pkg.dependencies).toHaveProperty('compression');
+            expect(pkg.dependencies).toHaveProperty('dotenv');
             expect(pkg.dependencies).toHaveProperty('bcryptjs');
             expect(pkg.devDependencies).toHaveProperty('@faker-js/faker');
+        });
+
+        it('env.ts auto-loads .env and throws instead of exiting on validation failure', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'config' }, BLOG_SCHEMA);
+            const envFile = files.find(f => f.path === 'src/config/env.ts')!;
+
+            expect(envFile.content).toContain("import 'dotenv/config'");
+            expect(envFile.content).toContain('throw new Error(`Invalid environment variables:');
+            expect(envFile.content).not.toContain('process.exit(');
         });
 
         it('app.ts imports all model routes', async () => {
@@ -501,6 +539,19 @@ model EventLog {
             expect(appFile.content).toContain('postRoutes');
             expect(appFile.content).toContain('/api/users');
             expect(appFile.content).toContain('/api/posts');
+        });
+
+        it('server.ts centralizes fatal exits in startup catch and uses dynamic imports', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'app' }, BLOG_SCHEMA);
+            const serverFile = files.find(f => f.path === 'src/server.ts')!;
+
+            expect(serverFile.content).toContain("const { env } = await import('./config/env.js');");
+            expect(serverFile.content).toContain('await Promise.all([');
+            expect(serverFile.content).toContain("main().catch(async (error) => {");
+            expect(serverFile.content).toContain('process.exit(1);');
+            expect(serverFile.content).not.toContain("import { env } from './config/env.js';");
+            expect(serverFile.content).not.toContain("import { app } from './app.js';");
         });
 
         it('app.ts uses named import for pinoHttp', async () => {
@@ -1970,6 +2021,106 @@ model Task {
             expect(taskTest.content).not.toContain('SetupToken');
             expect(taskTest.content).not.toContain("role: 'ADMIN'");
             expect(taskTest.content).not.toContain("role: 'MODERATOR'");
+        });
+    });
+
+    describe('auth model enum-role and selector map coverage', () => {
+        it('supports @bcm.authModel with enum role field named role', async () => {
+            const raw = readFixture('auth.prisma');
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions }, raw);
+
+            const authRoutes = files.find((f) => f.path === 'src/modules/auth/auth.routes.ts');
+            const teamRoutes = files.find((f) => f.path === 'src/modules/team/team.routes.ts');
+            const openapi = files.find((f) => f.path === 'openapi.json');
+
+            expect(authRoutes).toBeDefined();
+            expect(authRoutes!.content).toContain('role: user.role');
+            expect(teamRoutes).toBeDefined();
+            expect(teamRoutes!.content).toContain('authorize');
+            expect(openapi).toBeDefined();
+            expect(JSON.parse(openapi!.content).paths['/api/auth/login']).toBeDefined();
+        });
+
+        it('uses explicit @@id name/map selector key in service and selector-aware OpenAPI path', async () => {
+            const raw = readFixture('composite.prisma');
+            const schema = parsePrismaAst(raw);
+            const routeFiles = await generateProject(schema, { ...defaultOptions, only: 'routes' }, raw);
+            const swaggerFiles = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, raw);
+
+            const service = routeFiles.find((f) => f.path === 'src/modules/enrollment/enrollment.service.ts');
+            expect(service).toBeDefined();
+            expect(service!.content).toContain('enrollmentKey');
+            expect(service!.content).toContain('schoolId: key.schoolId');
+            expect(service!.content).toContain('studentId: key.studentId');
+
+            const openapi = JSON.parse(swaggerFiles[0].content);
+            expect(openapi.paths['/api/enrollments/{schoolId}/{studentId}']).toBeDefined();
+        });
+    });
+
+    describe('warning propagation', () => {
+        it('keeps generation successful when parser emits non-fatal warnings', async () => {
+            const raw = readFixture('warning-hidden-required.prisma');
+            const parsed = parsePrismaAst(raw);
+            expect(parsed.warnings.some((warning) => warning.includes('required but marked @bcm.hidden'))).toBe(true);
+
+            const files = await generateProject(parsed, { ...defaultOptions, only: 'routes' }, raw);
+            expect(files.length).toBeGreaterThan(0);
+            expect(files.some((file) => file.path.endsWith('auditEntry.controller.ts'))).toBe(true);
+        });
+    });
+
+    describe('examples smoke matrix', () => {
+        const exampleFiles = [
+            'ex1-todo.prisma',
+            'ex2-blog.prisma',
+            'ex3-task-manager.prisma',
+            'ex4-user-profile.prisma',
+            'ex5-school.prisma',
+            'ex6-org-chart.prisma',
+            'ex7-multi-tenant.prisma',
+            'ex8-ecommerce.prisma',
+            'ex9-social.prisma',
+            'ex10-hospital.prisma',
+            'ex11-newtest.prisma',
+            'ex12-4swapp.prisma',
+        ];
+
+        it('generates full output for all documented examples without crashes', async () => {
+            for (const exampleFile of exampleFiles) {
+                const raw = readFileSync(new URL(`../examples/${exampleFile}`, import.meta.url), 'utf8');
+                const parsed = parsePrismaAst(raw);
+                const files = await generateProject(parsed, defaultOptions, raw);
+                const paths = files.map((file) => file.path);
+
+                if (!paths.includes('openapi.json')) {
+                    throw new Error(`Missing openapi.json for ${exampleFile}`);
+                }
+                if (!paths.includes('src/app.ts')) {
+                    throw new Error(`Missing src/app.ts for ${exampleFile}`);
+                }
+                if (!paths.includes('src/server.ts')) {
+                    throw new Error(`Missing src/server.ts for ${exampleFile}`);
+                }
+
+                for (const model of parsed.models) {
+                    const modelLower = model.name.charAt(0).toLowerCase() + model.name.slice(1);
+                    const modulePrefix = `src/modules/${modelLower}/${modelLower}`;
+                    const expectedFiles = [
+                        `${modulePrefix}.controller.ts`,
+                        `${modulePrefix}.service.ts`,
+                        `${modulePrefix}.routes.ts`,
+                        `${modulePrefix}.dto.ts`,
+                        `${modulePrefix}.test.ts`,
+                    ];
+                    for (const expectedPath of expectedFiles) {
+                        if (!paths.includes(expectedPath)) {
+                            throw new Error(`Missing ${expectedPath} for ${exampleFile}`);
+                        }
+                    }
+                }
+            }
         });
     });
 });

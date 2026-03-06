@@ -1,0 +1,29 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum AppRole {
+  ADMIN
+  MEMBER
+}
+
+/// @bcm.authModel
+model User {
+  id String @id @default(cuid())
+  /// @bcm.identifier
+  email String @unique
+  /// @bcm.password
+  password String
+  role AppRole @default(MEMBER)
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model Team {
+  id String @id @default(cuid())
+  name String
+}

@@ -1,5 +1,16 @@
-import { describe, it, expect } from 'vitest';
-import { helpers, PRISMA_SCALAR_TYPES, renderInline } from '../src/generator/template-engine.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+    helpers,
+    PRISMA_SCALAR_TYPES,
+    renderInline,
+    renderTemplate,
+    setTemplateStore,
+} from '../src/generator/template-engine.js';
+
+afterEach(() => {
+    setTemplateStore(null);
+    vi.restoreAllMocks();
+});
 
 describe('PRISMA_SCALAR_TYPES', () => {
     it('contains all expected scalar types', () => {
@@ -193,5 +204,60 @@ describe('renderInline', () => {
     it('does not HTML-escape code output', () => {
         const result = renderInline('<%= code %>', { code: 'a<b>c' });
         expect(result).toBe('a<b>c');
+    });
+});
+
+describe('renderTemplate', () => {
+    it('renders templates from in-memory store when setTemplateStore is configured', () => {
+        setTemplateStore(new Map([
+            ['mock/template.ejs', 'Hello <%= name %> from <%= h.toPascalCase(place) %>'],
+        ]));
+
+        const result = renderTemplate('mock/template.ejs', { name: 'mk', place: 'playground' });
+        expect(result).toBe('Hello mk from Playground');
+    });
+
+    it('throws a clear error when template is missing in in-memory store', () => {
+        setTemplateStore(new Map([
+            ['known.ejs', 'ok'],
+        ]));
+
+        expect(() => renderTemplate('unknown.ejs', {})).toThrow('Template not found in store: "unknown.ejs"');
+    });
+
+    it('falls back to second read attempt when the first filesystem read fails', async () => {
+        vi.resetModules();
+
+        let readAttempts = 0;
+        vi.doMock('fs', async () => {
+            const actual = await vi.importActual<typeof import('fs')>('fs');
+            return {
+                ...actual,
+                readFileSync: ((...args: Parameters<typeof actual.readFileSync>) => {
+                    readAttempts += 1;
+                    if (readAttempts === 1) {
+                        throw new Error('Simulated missing primary template path');
+                    }
+                    return actual.readFileSync(...args);
+                }) as typeof actual.readFileSync,
+            };
+        });
+
+        const isolatedModule = await import('../src/generator/template-engine.js');
+        const rendered = isolatedModule.renderTemplate('config/logger.ts.ejs', {});
+
+        expect(rendered).toContain("import { pino } from 'pino'");
+        expect(readAttempts).toBe(2);
+
+        isolatedModule.setTemplateStore(null);
+        vi.doUnmock('fs');
+        vi.resetModules();
+    });
+
+    it('throws a descriptive error when template does not exist on disk', () => {
+        setTemplateStore(null);
+
+        expect(() => renderTemplate('missing/template.ejs', {})).toThrow('Template not found: "missing/template.ejs"');
+        expect(() => renderTemplate('missing/template.ejs', {})).toThrow('Tried:');
     });
 });

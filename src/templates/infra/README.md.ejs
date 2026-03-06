@@ -32,6 +32,9 @@ npx prisma migrate dev --name init
 npm run dev
 \`\`\`
 
+The server and test runtime auto-load environment variables from `.env` via `dotenv`.
+Keep `.env` present (for example, by copying `.env.example`) before running `npm run dev` or `npm test`.
+
 ## API Documentation
 
 Once the server is running, visit:

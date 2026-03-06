@@ -1,0 +1,16 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Enrollment {
+  schoolId String
+  studentId String
+  active Boolean @default(true)
+
+  @@id([schoolId, studentId], name: "enrollmentKey", map: "pk_enrollment")
+}

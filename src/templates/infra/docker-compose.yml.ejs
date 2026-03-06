@@ -1,7 +1,5 @@
 <% const dbName = h.toSnakeCase(projectName || 'app'); -%>
 <% if (provider === 'sqlite') { -%>
-version: '3.8'
-
 services:
   app:
     build: .
@@ -10,7 +8,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:./data/<%= dbName %>.db
-      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}
+      - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}"
     volumes:
       - appdata:/app/data
     restart: unless-stopped
@@ -20,8 +18,6 @@ volumes:
 <% } else if (provider === 'mysql') { -%>
 # SECURITY: Set MYSQL_PASSWORD and JWT_SECRET in a .env file
 # before deploying to production. Do not commit credentials to source control.
-version: '3.8'
-
 services:
   app:
     build: .
@@ -30,7 +26,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=mysql://${MYSQL_USER:-root}:${MYSQL_PASSWORD:-root}@db:3306/<%= dbName %>
-      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}
+      - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}"
     depends_on:
       db:
         condition: service_healthy
@@ -56,8 +52,6 @@ volumes:
 <% } else if (provider === 'mongodb') { -%>
 # SECURITY: Set MONGO_PASSWORD and JWT_SECRET in a .env file
 # before deploying to production. Do not commit credentials to source control.
-version: '3.8'
-
 services:
   app:
     build: .
@@ -66,7 +60,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=mongodb://${MONGO_USER:-mongo}:${MONGO_PASSWORD:-mongo}@db:27017/<%= dbName %>?authSource=admin
-      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}
+      - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}"
     depends_on:
       db:
         condition: service_healthy
@@ -93,8 +87,6 @@ volumes:
 <% } else { -%>
 # SECURITY: Set POSTGRES_USER, POSTGRES_PASSWORD, and JWT_SECRET in a .env file
 # before deploying to production. Do not commit credentials to source control.
-version: '3.8'
-
 services:
   app:
     build: .
@@ -103,7 +95,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/<%= dbName %>?schema=public
-      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}
+      - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}"
     depends_on:
       db:
         condition: service_healthy

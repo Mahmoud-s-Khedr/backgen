@@ -73,6 +73,7 @@ type PrismaDelegateMock = {
   findFirst: ReturnType<typeof vi.fn>;
   create: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  updateMany: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
 };
 
@@ -84,6 +85,7 @@ function createDelegateMock(): PrismaDelegateMock {
     findFirst: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
     delete: vi.fn(),
   };
 }
@@ -117,6 +119,7 @@ beforeEach(() => {
     delegate.findFirst.mockReset();
     delegate.create.mockReset();
     delegate.update.mockReset();
+    delegate.updateMany.mockReset();
     delegate.delete.mockReset();
   }
 });
@@ -275,7 +278,11 @@ describe('<%= model.name %> API', () => {
 
   describe('PUT ' + existingItemPath, () => {
     it('returns 404 when mocked Prisma reports a missing record', async () => {
+<% if (isSoftDelete) { -%>
+      modelDelegate.updateMany.mockResolvedValue({ count: 0 });
+<% } else { -%>
       modelDelegate.update.mockRejectedValue({ code: 'P2025' });
+<% } -%>
 
       const requestBuilder = request(app)
         .put(missingItemPath)
@@ -293,7 +300,7 @@ describe('<%= model.name %> API', () => {
   describe('DELETE ' + existingItemPath, () => {
     it('returns 404 when mocked Prisma reports a missing record', async () => {
 <% if (isSoftDelete) { -%>
-      modelDelegate.update.mockRejectedValue({ code: 'P2025' });
+      modelDelegate.updateMany.mockResolvedValue({ count: 0 });
 <% } else { -%>
       modelDelegate.delete.mockRejectedValue({ code: 'P2025' });
 <% } -%>
