@@ -1,0 +1,31 @@
+import type { FastifyReply } from 'fastify';
+
+interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+/**
+ * Send a success response (200 OK).
+ */
+export function sendSuccess<T>(reply: FastifyReply, data: T, meta?: PaginationMeta): void {
+  const body: { data: T; meta?: PaginationMeta } = { data };
+  if (meta) body.meta = meta;
+  reply.code(200).send(body);
+}
+
+/**
+ * Send a created response (201 Created).
+ */
+export function sendCreated<T>(reply: FastifyReply, data: T): void {
+  reply.code(201).send({ data });
+}
+
+/**
+ * Send a no-content response (204 No Content).
+ */
+export function sendNoContent(reply: FastifyReply): void {
+  reply.code(204).send();
+}

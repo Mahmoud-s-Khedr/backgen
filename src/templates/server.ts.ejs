@@ -1,25 +1,39 @@
 async function main() {
   const { env } = await import('./config/env.js');
+<% const hasCache = schema.models.some((m) => m.cacheConfig != null); -%>
+<% const hasAuth = schema.models.some((m) => m.isAuthModel); -%>
+<% const needsRedis = hasCache || hasAuth; -%>
   const [{ app }, { prisma }, { logger }] = await Promise.all([
     import('./app.js'),
     import('./config/database.js'),
     import('./config/logger.js'),
   ]);
+<% if (needsRedis) { -%>
+  const { redisConnect, redis } = await import('./config/redis.js');
+<% } -%>
   const PORT = env.PORT;
 
   // Verify database connection
   await prisma.$connect();
   logger.info('Database connected');
+<% if (needsRedis) { -%>
+  await redisConnect();
+  logger.info('Redis connected');
+<% } -%>
 
   const server = app.listen(PORT, () => {
     logger.info({ port: PORT }, 'Server started');
-    logger.info(`API docs: http://localhost:${PORT}/api/docs`);
+    logger.info(`API docs: http://localhost:${PORT}/api/v1/docs`);
   });
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutting down gracefully...');
     server.close(async () => {
+<% if (needsRedis) { -%>
+      await redis.quit();
+      logger.info('Redis disconnected');
+<% } -%>
       await prisma.$disconnect();
       logger.info('Database disconnected');
       process.exit(0);

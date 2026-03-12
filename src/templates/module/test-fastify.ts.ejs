@@ -1,0 +1,22 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildApp } from '../../app.js';
+
+describe('<%= model.name %> API (Fastify)', () => {
+  let app: Awaited<ReturnType<typeof buildApp>>;
+
+  beforeAll(async () => {
+    app = await buildApp();
+  });
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  it('exposes health endpoint', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/health',
+    });
+    expect(response.statusCode).toBe(200);
+  });
+});

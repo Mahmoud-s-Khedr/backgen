@@ -1,13 +1,23 @@
+<% if (provider === 'sqlite') { -%>
+import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+<% } else if (provider === 'postgresql' || provider === 'cockroachdb') { -%>
+import { PrismaPg } from '@prisma/adapter-pg';
+<% } else if (provider === 'mysql') { -%>
+import { PrismaMariaDb } from '@prisma/adapter-mariadb';
+<% } -%>
 import { PrismaClient } from '@prisma/client';
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined };
+<% if (provider === 'sqlite') { -%>
+const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL! });
+<% } else if (provider === 'postgresql' || provider === 'cockroachdb') { -%>
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+<% } else if (provider === 'mysql') { -%>
+const adapter = new PrismaMariaDb(process.env.DATABASE_URL!);
+<% } -%>
 
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['query', 'info', 'warn', 'error'] : ['error'],
-  });
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = prisma;
-}
+export const prisma = new PrismaClient({
+<% if (provider === 'sqlite' || provider === 'postgresql' || provider === 'cockroachdb' || provider === 'mysql') { -%>
+  adapter,
+<% } -%>
+  log: process.env.NODE_ENV === 'development' ? ['query', 'info', 'warn', 'error'] : ['error'],
+});

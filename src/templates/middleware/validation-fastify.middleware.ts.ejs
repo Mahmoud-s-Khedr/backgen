@@ -1,0 +1,15 @@
+import type { ZodSchema } from 'zod';
+
+/**
+ * Fastify validation is handled in route-level preValidation blocks.
+ * This helper exists for template parity and utility reuse.
+ */
+export function validate<T>(schema: ZodSchema<T>) {
+  return (input: unknown): T => {
+    const result = schema.safeParse(input);
+    if (!result.success) {
+      throw { statusCode: 422, message: result.error.flatten() };
+    }
+    return result.data;
+  };
+}

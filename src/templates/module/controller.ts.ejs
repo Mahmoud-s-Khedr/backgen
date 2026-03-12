@@ -1,4 +1,8 @@
-import { Request, Response, NextFunction } from 'express';
+<% if (framework === 'fastify') { -%>
+import type { FastifyReply, FastifyRequest } from 'fastify';
+<% } else { -%>
+import type { Request, Response, NextFunction } from 'express';
+<% } -%>
 import { <%= model.name %>Service } from './<%= h.toCamelCase(model.name) %>.service.js';
 import { <%= model.name %>ResponseSchema, <%= model.name %>WithIncludesResponseSchema } from './<%= h.toCamelCase(model.name) %>.dto.js';
 import { buildQueryOptions } from '../../utils/query-builder.js';
@@ -19,6 +23,20 @@ const FILTER_FIELD_TYPES = {
 <% } -%>
 } as const;
 const DEFAULT_SORT_FIELD: string | undefined = <%= defaultSortField ? `'${defaultSortField}'` : 'undefined' %>;
+
+<% if (framework === 'fastify') { -%>
+type ControllerRequest = FastifyRequest<{
+  Params: Record<string, string>;
+  Querystring: Record<string, unknown>;
+  Body: unknown;
+}>;
+type ControllerResponse = FastifyReply;
+type ControllerNext = (err?: unknown) => void;
+<% } else { -%>
+type ControllerRequest = Request;
+type ControllerResponse = Response;
+type ControllerNext = NextFunction;
+<% } -%>
 
 /**
  * <%= model.name %> Controller
@@ -72,7 +90,7 @@ export class <%= model.name %>Controller {
     return rawValue;
   }
 
-  private readKeyFromParams(req: Request): {
+  private readKeyFromParams(req: ControllerRequest): {
 <% for (const fieldMeta of itemSelectorFieldMeta) { -%>
     <%= fieldMeta.name %>: <%= fieldMeta.tsType %>;
 <% } -%>
@@ -80,7 +98,7 @@ export class <%= model.name %>Controller {
     return {
 <% for (const fieldMeta of itemSelectorFieldMeta) { -%>
       <%= fieldMeta.name %>: this.parseSelectorParam(
-        req.params.<%= fieldMeta.name %>,
+        ((req.params as Record<string, string | undefined>)['<%= fieldMeta.name %>']),
         '<%= fieldMeta.name %>',
         '<%= fieldMeta.filterType %>'
       ) as <%= fieldMeta.tsType %>,
@@ -88,11 +106,13 @@ export class <%= model.name %>Controller {
     };
   }
 
-  private keyDescription(req: Request): string {
+  private keyDescription(req: ControllerRequest): string {
 <% if (itemSelector.fields.length === 1) { -%>
-    return `<%= itemSelector.fields[0] %>=\"${req.params.<%= itemSelector.fields[0] %>}\"`;
+    const params = req.params as Record<string, string | undefined>;
+    return `<%= itemSelector.fields[0] %>=\"${params.<%= itemSelector.fields[0] %>}\"`;
 <% } else { -%>
-    return `<%= itemSelector.fields.map((f) => `${f}=\\\"\${req.params.${f}}\\\"`).join(', ') %>`;
+    const params = req.params as Record<string, string | undefined>;
+    return `<%= itemSelector.fields.map((f) => `${f}=\\\"\${params.${f}}\\\"`).join(', ') %>`;
 <% } -%>
   }
 
@@ -100,9 +120,9 @@ export class <%= model.name %>Controller {
   /**
    * GET /api/<%= h.pluralize(h.toCamelCase(model.name)) %>
    */
-  async list(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async list(req: ControllerRequest, res: ControllerResponse, next: ControllerNext): Promise<void> {
     try {
-      const options = buildQueryOptions(req.query, {
+      const options = buildQueryOptions(req.query as Record<string, any>, {
         allowedFilterFields: ALLOWED_FILTER_FIELDS,
         searchableFields: SEARCHABLE_FIELDS,
         allowedIncludeRelations: ALLOWED_INCLUDE_RELATIONS,
@@ -131,9 +151,9 @@ export class <%= model.name %>Controller {
   /**
    * GET /api/<%= h.pluralize(h.toCamelCase(model.name)) %><%= itemPath %>
    */
-  async getOne(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getOne(req: ControllerRequest, res: ControllerResponse, next: ControllerNext): Promise<void> {
     try {
-      const options = buildQueryOptions(req.query, {
+      const options = buildQueryOptions(req.query as Record<string, any>, {
         allowedFilterFields: ALLOWED_FILTER_FIELDS,
         searchableFields: SEARCHABLE_FIELDS,
         allowedIncludeRelations: ALLOWED_INCLUDE_RELATIONS,
@@ -165,9 +185,9 @@ export class <%= model.name %>Controller {
   /**
    * POST /api/<%= h.pluralize(h.toCamelCase(model.name)) %>
    */
-  async create(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async create(req: ControllerRequest, res: ControllerResponse, next: ControllerNext): Promise<void> {
     try {
-      const result = await service.create(req.body);
+      const result = await service.create(req.body as any);
       sendCreated(res, <%= model.name %>ResponseSchema.parse(result));
     } catch (error) {
       next(error);
@@ -178,9 +198,9 @@ export class <%= model.name %>Controller {
   /**
    * PUT /api/<%= h.pluralize(h.toCamelCase(model.name)) %><%= itemPath %>
    */
-  async update(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async update(req: ControllerRequest, res: ControllerResponse, next: ControllerNext): Promise<void> {
     try {
-      const result = await service.update(this.readKeyFromParams(req), req.body);
+      const result = await service.update(this.readKeyFromParams(req), req.body as any);
       sendSuccess(res, <%= model.name %>ResponseSchema.parse(result));
     } catch (error) {
       next(error);
@@ -190,9 +210,9 @@ export class <%= model.name %>Controller {
   /**
    * PATCH /api/<%= h.pluralize(h.toCamelCase(model.name)) %><%= itemPath %>
    */
-  async patch(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async patch(req: ControllerRequest, res: ControllerResponse, next: ControllerNext): Promise<void> {
     try {
-      const result = await service.update(this.readKeyFromParams(req), req.body);
+      const result = await service.update(this.readKeyFromParams(req), req.body as any);
       sendSuccess(res, <%= model.name %>ResponseSchema.parse(result));
     } catch (error) {
       next(error);
@@ -202,7 +222,7 @@ export class <%= model.name %>Controller {
   /**
    * DELETE /api/<%= h.pluralize(h.toCamelCase(model.name)) %><%= itemPath %>
    */
-  async remove(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async remove(req: ControllerRequest, res: ControllerResponse, next: ControllerNext): Promise<void> {
     try {
       await service.delete(this.readKeyFromParams(req));
       sendNoContent(res);

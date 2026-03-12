@@ -1,0 +1,35 @@
+import type { FastifyInstance } from 'fastify';
+import swagger from '@fastify/swagger';
+import swaggerUi from '@fastify/swagger-ui';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+
+/**
+ * Register @fastify/swagger and @fastify/swagger-ui to serve API docs at /api/docs.
+ * Loads the pre-generated openapi.json spec file.
+ */
+export async function setupSwagger(app: FastifyInstance): Promise<void> {
+  const specPath = join(process.cwd(), 'openapi.json');
+
+  if (!existsSync(specPath)) {
+    app.log.warn('openapi.json not found, Swagger UI disabled');
+    return;
+  }
+
+  let spec: unknown;
+  try {
+    spec = JSON.parse(readFileSync(specPath, 'utf-8'));
+  } catch (error) {
+    app.log.error({ error }, 'Failed to load OpenAPI spec');
+    return;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await app.register(swagger, { mode: 'static', specification: { document: spec as any } });
+  await app.register(swaggerUi, {
+    routePrefix: '/api/docs',
+    uiConfig: { docExpansion: 'list', deepLinking: true },
+  });
+
+  app.log.info('Swagger UI available at /api/docs');
+}

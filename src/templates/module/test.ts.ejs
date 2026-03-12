@@ -100,6 +100,18 @@ vi.mock('../../config/database.js', () => ({
   prisma: prismaMock,
 }));
 
+<% if (cacheConfig) { -%>
+vi.mock('../../config/redis.js', () => ({
+  redis: {
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue('OK'),
+    del: vi.fn().mockResolvedValue(1),
+    incr: vi.fn().mockResolvedValue(2),
+  },
+  redisConnect: vi.fn().mockResolvedValue(undefined),
+}));
+
+<% } -%>
 const { app } = await import('../../app.js');
 
 <% if (isProtected) { -%>
@@ -146,7 +158,7 @@ function validPayload() {
 }
 
 describe('<%= model.name %> API', () => {
-  const basePath = '/api/<%= h.pluralize(h.toCamelCase(model.name)) %>';
+  const basePath = '/api/v1/<%= h.pluralize(h.toCamelCase(model.name)) %>';
 <% if (itemSelector) { -%>
   const existingKey = {
 <% for (const fieldMeta of itemSelectorFieldMeta) { -%>

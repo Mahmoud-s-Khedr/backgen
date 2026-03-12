@@ -1,0 +1,35 @@
+import type { FastifyRequest, FastifyReply } from 'fastify';
+
+declare module '@fastify/jwt' {
+  interface FastifyJWT {
+    payload: { sub: string; role?: string; [key: string]: unknown };
+    user: { sub: string; role?: string; [key: string]: unknown };
+  }
+}
+
+export async function authenticate(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+  try {
+    await req.jwtVerify();
+  } catch {
+    return reply.status(401).send({
+      type: 'unauthorized',
+      title: 'Unauthorized',
+      status: 401,
+      detail: 'Missing or invalid authentication token.',
+    });
+  }
+}
+
+export function authorize(...roles: string[]) {
+  return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const userRole = req.user?.role;
+    if (!roles.includes(userRole ?? '')) {
+      return reply.status(403).send({
+        type: 'forbidden',
+        title: 'Forbidden',
+        status: 403,
+        detail: `Access requires one of the following roles: ${roles.join(', ')}.`,
+      });
+    }
+  };
+}

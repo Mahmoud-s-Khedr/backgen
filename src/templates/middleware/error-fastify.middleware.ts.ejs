@@ -1,0 +1,72 @@
+import type { FastifyError, FastifyRequest, FastifyReply } from 'fastify';
+
+export interface ProblemDetailInit {
+  type: string;
+  title: string;
+  status: number;
+  detail?: string;
+  instance?: string;
+}
+
+export class ProblemDetail extends Error {
+  type: string;
+  title: string;
+  status: number;
+  detail?: string;
+  instance?: string;
+
+  constructor(init: ProblemDetailInit) {
+    super(init.detail ?? init.title);
+    this.type = init.type;
+    this.title = init.title;
+    this.status = init.status;
+    this.detail = init.detail;
+    this.instance = init.instance;
+  }
+}
+
+/**
+ * Fastify error handler — maps ProblemDetail and Prisma errors to RFC 7807 responses.
+ */
+export function errorHandler(
+  error: FastifyError & Partial<ProblemDetail>,
+  _req: FastifyRequest,
+  reply: FastifyReply
+): void {
+  // ProblemDetail (application errors)
+  if (error instanceof ProblemDetail) {
+    reply.status(error.status).send({
+      type: error.type,
+      title: error.title,
+      status: error.status,
+      detail: error.detail,
+      instance: error.instance,
+    });
+    return;
+  }
+
+  // Prisma not-found error
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code: string }).code === 'P2025'
+  ) {
+    reply.status(404).send({
+      type: 'not-found',
+      title: 'Not Found',
+      status: 404,
+      detail: error.message,
+    });
+    return;
+  }
+
+  // Fastify validation error (statusCode set)
+  const status = error.statusCode ?? 500;
+  reply.status(status).send({
+    type: status >= 500 ? 'internal-server-error' : 'bad-request',
+    title: status >= 500 ? 'Internal Server Error' : 'Bad Request',
+    status,
+    detail: status < 500 ? error.message : 'An unexpected error occurred.',
+  });
+}

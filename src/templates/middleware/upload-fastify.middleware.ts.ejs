@@ -1,0 +1,37 @@
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { MultipartFile } from '@fastify/multipart';
+import { persistUpload, type UploadFieldConfig } from '../config/upload.js';
+
+type RequestWithBody = FastifyRequest<{ Body: Record<string, unknown> }> & {
+  isMultipart: () => boolean;
+  file: () => Promise<MultipartFile | undefined>;
+};
+
+/**
+ * Fastify upload preHandler for a single field.
+ * Stores uploaded content then maps the resulting path/URL into req.body[fieldName].
+ */
+export function uploadField(fieldName: string, config: UploadFieldConfig) {
+  return async (req: FastifyRequest, _reply: FastifyReply): Promise<void> => {
+    const request = req as RequestWithBody;
+    if (!request.isMultipart()) {
+      return;
+    }
+
+    const file = await request.file();
+    if (!file) {
+      return;
+    }
+
+    if (file.fieldname !== fieldName) {
+      return;
+    }
+
+    const uploaded = await persistUpload(file, config);
+    const body = (request.body && typeof request.body === 'object')
+      ? request.body
+      : {};
+    body[fieldName] = uploaded;
+    request.body = body;
+  };
+}

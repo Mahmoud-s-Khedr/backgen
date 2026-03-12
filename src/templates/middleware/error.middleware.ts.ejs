@@ -62,7 +62,7 @@ export function errorMiddleware(err: Error, req: Request, res: Response, _next: 
       status: 422,
       detail: 'Request validation failed.',
       instance: req.originalUrl,
-      errors: err.errors.map((e) => ({
+      errors: err.issues.map((e) => ({
         path: e.path.join('.'),
         message: e.message,
         code: e.code,

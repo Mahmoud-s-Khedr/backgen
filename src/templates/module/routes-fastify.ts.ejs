@@ -1,0 +1,90 @@
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { <%= model.name %>Controller } from './<%= h.toCamelCase(model.name) %>.controller.js';
+import { Create<%= model.name %>Schema, Update<%= model.name %>Schema, Patch<%= model.name %>Schema } from './<%= h.toCamelCase(model.name) %>.dto.js';
+<% if (isProtected) { -%>
+import { authenticate<%= authRoles.length > 0 ? ', authorize' : '' %> } from '../../middlewares/auth.middleware.js';
+<% } -%>
+<% if (hasUploads) { -%>
+import { uploadField } from '../../middlewares/upload.middleware.js';
+<% } -%>
+
+const controller = new <%= model.name %>Controller();
+
+<%
+const authPreHandlers = isProtected
+  ? (authRoles.length > 0
+      ? ['authenticate', `authorize(${authRoles.map(r => `'${r}'`).join(', ')})`]
+      : ['authenticate'])
+  : [];
+const uploadPreHandlers = hasUploads
+  ? uploadFields.map((f) => `uploadField('${f.name}', { dest: '${f.uploadConfig?.dest ?? f.name}', maxSize: ${f.uploadConfig?.maxSize ?? 'undefined'}, mimeTypes: ${f.uploadConfig?.mimeTypes ? JSON.stringify(f.uploadConfig.mimeTypes) : 'undefined'} })`)
+  : [];
+const readPreHandlerOption = authPreHandlers.length > 0
+  ? `preHandler: [${authPreHandlers.join(', ')}],`
+  : '';
+const writePreHandlerOption = authPreHandlers.length > 0
+  ? `preHandler: [${authPreHandlers.join(', ')}],`
+  : '';
+const writePreValidationPrefix = uploadPreHandlers.length > 0
+  ? `${uploadPreHandlers.join(', ')},`
+  : '';
+%>
+
+export async function <%= h.toCamelCase(model.name) %>Routes(fastify: FastifyInstance) {
+  // GET /
+  fastify.get('/', async (req: FastifyRequest, reply: FastifyReply) => {
+    return controller.list(req as any, reply as any, (err) => { if (err) throw err; });
+  });
+
+<% if (itemSelector) { -%>
+  // GET /<%= itemPath %>
+  fastify.get('<%= itemPath %>', async (req: FastifyRequest, reply: FastifyReply) => {
+    return controller.getOne(req as any, reply as any, (err) => { if (err) throw err; });
+  });
+<% } -%>
+
+  // POST /
+  fastify.post('/', {
+    <%- writePreHandlerOption %>
+    preValidation: [<%- writePreValidationPrefix %>async (req: FastifyRequest) => {
+      const result = Create<%= model.name %>Schema.safeParse(req.body);
+      if (!result.success) throw { statusCode: 422, message: result.error.flatten() };
+      req.body = result.data;
+    }],
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
+    return controller.create(req as any, reply as any, (err) => { if (err) throw err; });
+  });
+
+<% if (itemSelector) { -%>
+  // PUT /<%= itemPath %>
+  fastify.put('<%= itemPath %>', {
+    <%- writePreHandlerOption %>
+    preValidation: [<%- writePreValidationPrefix %>async (req: FastifyRequest) => {
+      const result = Update<%= model.name %>Schema.safeParse(req.body);
+      if (!result.success) throw { statusCode: 422, message: result.error.flatten() };
+      req.body = result.data;
+    }],
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
+    return controller.update(req as any, reply as any, (err) => { if (err) throw err; });
+  });
+
+  // PATCH /<%= itemPath %>
+  fastify.patch('<%= itemPath %>', {
+    <%- writePreHandlerOption %>
+    preValidation: [<%- writePreValidationPrefix %>async (req: FastifyRequest) => {
+      const result = Patch<%= model.name %>Schema.safeParse(req.body);
+      if (!result.success) throw { statusCode: 422, message: result.error.flatten() };
+      req.body = result.data;
+    }],
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
+    return controller.patch(req as any, reply as any, (err) => { if (err) throw err; });
+  });
+
+  // DELETE /<%= itemPath %>
+  fastify.delete('<%= itemPath %>', {
+    <%- readPreHandlerOption %>
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
+    return controller.remove(req as any, reply as any, (err) => { if (err) throw err; });
+  });
+<% } -%>
+}

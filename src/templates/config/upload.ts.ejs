@@ -1,0 +1,102 @@
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { S3Client } from '@aws-sdk/client-s3';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
+import type { Request } from 'express';
+import { env } from './env.js';
+
+// ---------------------------------------------------------------------------
+// Local storage engine
+// ---------------------------------------------------------------------------
+function createLocalStorage(dest: string) {
+  const uploadDir = path.join(env.UPLOAD_DIR ?? 'uploads', dest);
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+  return multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// S3 / R2 / B2 storage engine (S3-compatible via optional endpoint)
+// ---------------------------------------------------------------------------
+let _s3Client: S3Client | null = null;
+
+function getS3Client(): S3Client {
+  if (!_s3Client) {
+    _s3Client = new S3Client({
+      region: env.S3_REGION ?? 'auto',
+      ...(env.S3_ENDPOINT ? { endpoint: env.S3_ENDPOINT } : {}),
+      credentials: env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
+        ? { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY }
+        : undefined,
+    });
+  }
+  return _s3Client;
+}
+
+function createS3Storage(dest: string) {
+  // multer memory storage + manual upload in afterMiddleware
+  return multer.memoryStorage();
+}
+
+// ---------------------------------------------------------------------------
+// Public factory
+// ---------------------------------------------------------------------------
+export interface UploadFieldConfig {
+  dest: string;
+  maxSize?: number;
+  mimeTypes?: string[];
+}
+
+/**
+ * Creates a multer middleware for a single upload field.
+ * Automatically picks local or S3 storage based on UPLOAD_STORAGE env var.
+ */
+export function createUploadMiddleware(fieldName: string, config: UploadFieldConfig) {
+  const storage = env.UPLOAD_STORAGE === 's3'
+    ? createS3Storage(config.dest)
+    : createLocalStorage(config.dest);
+
+  const upload = multer({
+    storage,
+    limits: { fileSize: config.maxSize ?? 10 * 1024 * 1024 },
+    fileFilter: config.mimeTypes?.length
+      ? (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+          if (config.mimeTypes!.includes(file.mimetype)) {
+            cb(null, true);
+          } else {
+            cb(new Error(`Unsupported file type: ${file.mimetype}. Allowed: ${config.mimeTypes!.join(', ')}`));
+          }
+        }
+      : undefined,
+  });
+
+  return upload.single(fieldName);
+}
+
+/**
+ * After multer runs, upload the in-memory file to S3 and return the public URL.
+ * Only needed when UPLOAD_STORAGE=s3.
+ */
+export async function uploadToS3(file: Express.Multer.File, dest: string): Promise<string> {
+  const s3 = getS3Client();
+  const bucket = env.S3_BUCKET;
+  if (!bucket) throw new Error('S3_BUCKET environment variable is required for S3 uploads');
+
+  const key = `${dest}/${Date.now()}-${Math.random().toString(36).slice(2)}-${file.originalname}`;
+  await s3.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: file.buffer,
+    ContentType: file.mimetype,
+  }));
+
+  const endpoint = env.S3_ENDPOINT ?? `https://s3.${env.S3_REGION ?? 'us-east-1'}.amazonaws.com`;
+  return `${endpoint}/${bucket}/${key}`;
+}

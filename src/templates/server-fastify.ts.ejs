@@ -1,0 +1,46 @@
+async function main() {
+  const { env } = await import('./config/env.js');
+<% const hasCache = schema.models.some((m) => m.cacheConfig != null); -%>
+<% const hasAuth = schema.models.some((m) => m.isAuthModel); -%>
+<% const needsRedis = hasCache || hasAuth; -%>
+  const [{ buildApp }, { prisma }] = await Promise.all([
+    import('./app.js'),
+    import('./config/database.js'),
+  ]);
+<% if (needsRedis) { -%>
+  const { redisConnect, redis } = await import('./config/redis.js');
+<% } -%>
+
+  const app = await buildApp();
+
+  // Verify database connection
+  await prisma.$connect();
+  app.log.info('Database connected');
+<% if (needsRedis) { -%>
+  await redisConnect();
+  app.log.info('Redis connected');
+<% } -%>
+
+  await app.listen({ port: env.PORT, host: '0.0.0.0' });
+
+  // Graceful shutdown
+  const shutdown = async (signal: string) => {
+    app.log.info({ signal }, 'Shutting down gracefully...');
+    await app.close();
+<% if (needsRedis) { -%>
+    await redis.quit();
+    app.log.info('Redis disconnected');
+<% } -%>
+    await prisma.$disconnect();
+    app.log.info('Database disconnected');
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+main().catch((error) => {
+  console.error('Failed to start server', error);
+  process.exit(1);
+});

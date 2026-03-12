@@ -35,6 +35,19 @@ for (const relation of includeRelations) {
     }
   }
 }
+
+function getFieldZodType(field, options = {}) {
+  const enumDef = enums.find(e => e.name === field.type);
+  let zodType = enumDef
+    ? `${enumDef.name}Schema`
+    : (options.coerceDate && field.type === 'DateTime'
+      ? 'z.coerce.date()'
+      : h.prismaToZodType(field.type));
+  if (field.isList) {
+    zodType = `z.array(${zodType})`;
+  }
+  return zodType;
+}
 -%>
 <% for (const enumDef of enums) { -%>
 <% if (requiredEnumNames.has(enumDef.name)) { -%>
@@ -56,7 +69,7 @@ export const <%= enumDef.name %>Schema = z.enum([<%= enumDef.values.map(v => `'$
 export const <%= model.name %>_<%= h.toPascalCase(nr.name) %>Input = z.object({
   create: <%= nr.isList ? 'z.array(' : '' %>z.object({
 <% for (const f of targetCreateFields) { -%>
-<% const ed = enums.find(e => e.name === f.type); const zt = ed ? `${ed.name}Schema` : h.prismaToZodType(f.type); const io = f.isOptional || f.hasDefault; -%>
+<% const zt = getFieldZodType(f); const io = f.isOptional || f.hasDefault; -%>
     <%= f.name %>: <%= zt %><%= io ? '.optional()' : '' %>,
 <% } -%>
   })<%= nr.isList ? ').min(1)' : '' %>.optional(),
@@ -64,12 +77,12 @@ export const <%= model.name %>_<%= h.toPascalCase(nr.name) %>Input = z.object({
 <% if (connectMeta.selector.isComposite) { -%>
     <%= connectMeta.selector.prismaWhereKey || connectMeta.selector.fields.map((f) => f.name).join('_') %>: z.object({
 <% for (const selectorField of connectMeta.selector.fields) { -%>
-<% const sf = targetModel.fields.find(f => f.name === selectorField.name); const enumDef = sf ? enums.find(e => e.name === sf.type) : undefined; const zodType = sf ? (enumDef ? `${enumDef.name}Schema` : h.prismaToZodType(sf.type)) : 'z.string()'; -%>
+<% const sf = targetModel.fields.find(f => f.name === selectorField.name); const zodType = sf ? getFieldZodType(sf) : 'z.string()'; -%>
       <%= selectorField.name %>: <%= zodType %>,
 <% } -%>
     }),
 <% } else { -%>
-<% const selectorField = connectMeta.selector.fields[0]; const sf = targetModel.fields.find(f => f.name === selectorField.name); const enumDef = sf ? enums.find(e => e.name === sf.type) : undefined; const zodType = sf ? (enumDef ? `${enumDef.name}Schema` : h.prismaToZodType(sf.type)) : 'z.string()'; -%>
+<% const selectorField = connectMeta.selector.fields[0]; const sf = targetModel.fields.find(f => f.name === selectorField.name); const zodType = sf ? getFieldZodType(sf) : 'z.string()'; -%>
     <%= selectorField.name %>: <%= zodType %>,
 <% } -%>
   })<%= nr.isList ? ').min(1)' : '' %>.optional(),
@@ -80,7 +93,7 @@ export const <%= model.name %>_<%= h.toPascalCase(nr.name) %>Input = z.object({
 export const <%= model.name %>_<%= h.toPascalCase(nr.name) %>Input = z.object({
   create: <%= nr.isList ? 'z.array(' : '' %>z.object({
 <% for (const f of targetCreateFields) { -%>
-<% const ed = enums.find(e => e.name === f.type); const zt = ed ? `${ed.name}Schema` : h.prismaToZodType(f.type); const io = f.isOptional || f.hasDefault; -%>
+<% const zt = getFieldZodType(f); const io = f.isOptional || f.hasDefault; -%>
     <%= f.name %>: <%= zt %><%= io ? '.optional()' : '' %>,
 <% } -%>
   })<%= nr.isList ? ').min(1)' : '' %>,
@@ -101,7 +114,7 @@ export const Create<%= model.name %>Schema = z.object({
 <%   /* Skip FK fields that have a corresponding @bcm.nested relation */ -%>
 <%   const nestedForFk = nestedRelations.find(nr => nr.relationField && nr.relationField.split(', ').includes(field.name)); -%>
 <%   if (nestedForFk) continue; -%>
-<% const enumDef = enums.find(e => e.name === field.type); const zodType = enumDef ? `${enumDef.name}Schema` : h.prismaToZodType(field.type); const isOpt = field.isOptional || field.hasDefault; -%>
+<% const zodType = getFieldZodType(field); const isOpt = field.isOptional || field.hasDefault; -%>
   <%= field.name %>: <%= zodType %><%= isOpt ? '.optional()' : '' %>,<%= field.isUnique ? ' // Must be unique' : '' %>
 <% } -%>
 <% for (const nr of nestedRelations) { -%>
@@ -132,7 +145,7 @@ export const Patch<%= model.name %>Schema = Create<%= model.name %>Schema.partia
 <% const targetResponseFields = targetModel.fields.filter(f => !f.isRelation && !f.directives.includes('hidden') && !f.directives.includes('writeOnly')); -%>
 export const <%= model.name %>_<%= h.toPascalCase(relation.name) %>RelationSchema = z.object({
 <% for (const field of targetResponseFields) { -%>
-<% const enumDef = enums.find(e => e.name === field.type); const zodType = enumDef ? `${enumDef.name}Schema` : (field.type === 'DateTime' ? 'z.coerce.date()' : h.prismaToZodType(field.type)); -%>
+<% const zodType = getFieldZodType(field, { coerceDate: true }); -%>
   <%= field.name %>: <%= zodType %><%= field.isOptional ? '.nullish()' : (field.hasDefault ? '.optional()' : '') %>,
 <% } -%>
 });
@@ -147,7 +160,7 @@ export const <%= model.name %>_<%= h.toPascalCase(relation.name) %>RelationSchem
 export const <%= model.name %>ResponseSchema = z.object({
 <% for (const field of responseFields) { -%>
 <% if (field.isRelation) continue; -%>
-<% const enumDef = enums.find(e => e.name === field.type); const zodType = enumDef ? `${enumDef.name}Schema` : (field.type === 'DateTime' ? 'z.coerce.date()' : h.prismaToZodType(field.type)); -%>
+<% const zodType = getFieldZodType(field, { coerceDate: true }); -%>
   <%= field.name %>: <%= zodType %><%= field.isOptional ? '.nullish()' : (field.hasDefault ? '.optional()' : '') %>,
 <% } -%>
 });

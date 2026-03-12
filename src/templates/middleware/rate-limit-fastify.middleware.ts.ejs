@@ -1,0 +1,9 @@
+import type { FastifyReply, FastifyRequest } from 'fastify';
+
+/**
+ * Fastify uses @fastify/rate-limit plugin at app level.
+ * This preHandler is a no-op placeholder for API parity.
+ */
+export async function rateLimiter(_req: FastifyRequest, _reply: FastifyReply): Promise<void> {
+  // Intentionally empty.
+}

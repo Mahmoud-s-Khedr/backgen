@@ -1,4 +1,8 @@
+<% if (framework === 'fastify') { -%>
+import type { FastifyCorsOptions } from '@fastify/cors';
+<% } else { -%>
 import type { CorsOptions } from 'cors';
+<% } -%>
 
 // SECURITY: Set CORS_ORIGIN in your environment (e.g., https://your-frontend.com).
 // In production, an unset CORS_ORIGIN disables cross-origin access entirely.
@@ -13,7 +17,7 @@ if (process.env.NODE_ENV === 'production' && !process.env.CORS_ORIGIN) {
   );
 }
 
-export const corsOptions: CorsOptions = {
+export const corsOptions: <%= framework === 'fastify' ? 'FastifyCorsOptions' : 'CorsOptions' %> = {
   origin,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],

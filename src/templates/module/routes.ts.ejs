@@ -5,26 +5,30 @@ import { validate } from '../../middlewares/validation.middleware.js';
 <% if (isProtected) { %>
 import { authenticate<%= authRoles.length > 0 ? ', authorize' : '' %> } from '../../middlewares/auth.middleware.js';
 <% } %>
+<% if (hasUploads) { -%>
+import { uploadField } from '../../middlewares/upload.middleware.js';
+<% } -%>
 const router = Router();
 const controller = new <%= model.name %>Controller();
 <% const roleGuard = authRoles.length > 0 ? `, authorize(${authRoles.map(r => `'${r}'`).join(', ')})` : ''; %>
+<% const uploadMiddlewares = uploadFields.map(f => `uploadField('${f.name}', { dest: '${f.uploadConfig?.dest ?? f.name}', maxSize: ${f.uploadConfig?.maxSize ?? 'undefined'}, mimeTypes: ${f.uploadConfig?.mimeTypes ? JSON.stringify(f.uploadConfig.mimeTypes) : 'undefined'} })`).join(', '); %>
 
 router.get('/', (req, res, next) => controller.list(req, res, next));
 <% if (itemSelector) { -%>
 router.get('<%= itemPath %>', (req, res, next) => controller.getOne(req, res, next));
 <% } -%>
 <% if (isProtected) { %>
-router.post('/', authenticate<%- roleGuard %>, validate(Create<%= model.name %>Schema), (req, res, next) => controller.create(req, res, next));
+router.post('/', authenticate<%- roleGuard %><% if (hasUploads) { %>, <%- uploadMiddlewares %><% } %>, validate(Create<%= model.name %>Schema), (req, res, next) => controller.create(req, res, next));
 <% if (itemSelector) { -%>
-router.put('<%= itemPath %>', authenticate<%- roleGuard %>, validate(Update<%= model.name %>Schema), (req, res, next) => controller.update(req, res, next));
-router.patch('<%= itemPath %>', authenticate<%- roleGuard %>, validate(Patch<%= model.name %>Schema), (req, res, next) => controller.patch(req, res, next));
+router.put('<%= itemPath %>', authenticate<%- roleGuard %><% if (hasUploads) { %>, <%- uploadMiddlewares %><% } %>, validate(Update<%= model.name %>Schema), (req, res, next) => controller.update(req, res, next));
+router.patch('<%= itemPath %>', authenticate<%- roleGuard %><% if (hasUploads) { %>, <%- uploadMiddlewares %><% } %>, validate(Patch<%= model.name %>Schema), (req, res, next) => controller.patch(req, res, next));
 router.delete('<%= itemPath %>', authenticate<%- roleGuard %>, (req, res, next) => controller.remove(req, res, next));
 <% } -%>
 <% } else { %>
-router.post('/', validate(Create<%= model.name %>Schema), (req, res, next) => controller.create(req, res, next));
+router.post('/'<% if (hasUploads) { %>, <%- uploadMiddlewares %><% } %>, validate(Create<%= model.name %>Schema), (req, res, next) => controller.create(req, res, next));
 <% if (itemSelector) { -%>
-router.put('<%= itemPath %>', validate(Update<%= model.name %>Schema), (req, res, next) => controller.update(req, res, next));
-router.patch('<%= itemPath %>', validate(Patch<%= model.name %>Schema), (req, res, next) => controller.patch(req, res, next));
+router.put('<%= itemPath %>'<% if (hasUploads) { %>, <%- uploadMiddlewares %><% } %>, validate(Update<%= model.name %>Schema), (req, res, next) => controller.update(req, res, next));
+router.patch('<%= itemPath %>'<% if (hasUploads) { %>, <%- uploadMiddlewares %><% } %>, validate(Patch<%= model.name %>Schema), (req, res, next) => controller.patch(req, res, next));
 router.delete('<%= itemPath %>', (req, res, next) => controller.remove(req, res, next));
 <% } -%>
 <% } %>

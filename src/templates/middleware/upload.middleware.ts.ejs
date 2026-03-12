@@ -1,0 +1,39 @@
+import type { Request, Response, NextFunction } from 'express';
+import { createUploadMiddleware, uploadToS3, type UploadFieldConfig } from '../config/upload.js';
+import { env } from '../config/env.js';
+
+/**
+ * Creates an Express middleware that handles a single file upload for a named field.
+ * Works with both local disk storage and S3-compatible object storage (S3/R2/B2).
+ *
+ * After the middleware runs, the uploaded file path/URL is attached to
+ * `req.body[fieldName]` so that subsequent validation and controller handlers
+ * can treat it as a regular string field.
+ */
+export function uploadField(fieldName: string, config: UploadFieldConfig) {
+  const multerMiddleware = createUploadMiddleware(fieldName, config);
+
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    multerMiddleware(req, res, async (err) => {
+      if (err) {
+        return next(err);
+      }
+
+      if (!req.file) {
+        return next();
+      }
+
+      try {
+        if (env.UPLOAD_STORAGE === 's3') {
+          const url = await uploadToS3(req.file, config.dest);
+          req.body[fieldName] = url;
+        } else {
+          req.body[fieldName] = req.file.path;
+        }
+        next();
+      } catch (uploadErr) {
+        next(uploadErr);
+      }
+    });
+  };
+}

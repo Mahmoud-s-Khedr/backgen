@@ -1,24 +1,12 @@
-import { Router } from 'express';
-import jwt from 'jsonwebtoken';
-import type { SignOptions } from 'jsonwebtoken';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../../config/database.js';
 import { env } from '../../config/env.js';
 import { redis } from '../../config/redis.js';
-import { validate } from '../../middlewares/validation.middleware.js';
 import { ProblemDetail } from '../../middlewares/error.middleware.js';
-import { sendSuccess, sendNoContent } from '../../utils/response.js';
-
-const router = Router();
 
 const REFRESH_TOKEN_TTL = parseInt(process.env.REFRESH_TOKEN_TTL || String(7 * 24 * 60 * 60), 10);
-
-function normalizeAccessTokenTtl(value: string): SignOptions['expiresIn'] {
-  return /^\d+$/.test(value) ? Number(value) : (value as SignOptions['expiresIn']);
-}
-
-const ACCESS_TOKEN_TTL = normalizeAccessTokenTtl(env.ACCESS_TOKEN_TTL ?? '15m');
 
 <%
 const identifierDef = authModel?.fields?.find((field) => field.name === identifierField);
@@ -35,27 +23,31 @@ const RefreshSchema = z.object({
   refreshToken: z.string().uuid(),
 });
 
-/**
- * POST /api/v1/auth/login
- * Authenticate with <%= identifierField %> and <%= passwordField %>. Returns an access token (short-lived)
- * and a refresh token (long-lived, stored in Redis for revocation support).
- */
-router.post('/login', validate(LoginSchema), async (req, res, next) => {
-  try {
-    const { <%= identifierField %>, <%= passwordField %> } = req.body as z.infer<typeof LoginSchema>;
+export async function authRoutes(fastify: FastifyInstance) {
+  /**
+   * POST /api/v1/auth/login
+   * Authenticate with <%= identifierField %> and <%= passwordField %>. Returns an access token (short-lived)
+   * and a refresh token (long-lived, stored in Redis for revocation support).
+   */
+  fastify.post('/login', async (req: FastifyRequest, reply: FastifyReply) => {
+    const parseResult = LoginSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      throw { statusCode: 422, message: parseResult.error.flatten() };
+    }
+    const { <%= identifierField %>, <%= passwordField %> } = parseResult.data;
     const user = await prisma.<%= authModelLower %>.findUnique({ where: { <%= identifierField %> } });
     const isValid = user
       ? await bcrypt.compare(<%= passwordField %>, user.<%= passwordField %>)
       : false;
     if (!isValid || !user) {
-      return next(new ProblemDetail({
+      throw new ProblemDetail({
         type: 'unauthorized',
         title: 'Invalid credentials',
         status: 401,
         detail: 'Invalid <%= identifierField %> or <%= passwordField %>.',
-      }));
+      });
     }
-    const accessToken = jwt.sign(
+    const accessToken = fastify.jwt.sign(
       {
         sub: String(user.id),
 <% if (roleField) { -%>
@@ -65,45 +57,44 @@ router.post('/login', validate(LoginSchema), async (req, res, next) => {
         <%= identifierField %>: user.<%= identifierField %>,
 <% } -%>
       },
-      env.JWT_SECRET,
-      { expiresIn: ACCESS_TOKEN_TTL }
+      { expiresIn: env.ACCESS_TOKEN_TTL ?? '15m' }
     );
     const refreshToken = crypto.randomUUID();
     await redis.set(`refresh_token:${refreshToken}`, String(user.id), { EX: REFRESH_TOKEN_TTL });
-    sendSuccess(res, { accessToken, refreshToken });
-  } catch (error) {
-    next(error);
-  }
-});
+    reply.send({ data: { accessToken, refreshToken } });
+  });
 
-/**
- * POST /api/v1/auth/refresh
- * Exchange a valid refresh token for a new access token + refresh token pair (token rotation).
- * The old refresh token is immediately invalidated, enabling per-device revocation.
- */
-router.post('/refresh', validate(RefreshSchema), async (req, res, next) => {
-  try {
-    const { refreshToken } = req.body as z.infer<typeof RefreshSchema>;
+  /**
+   * POST /api/v1/auth/refresh
+   * Exchange a valid refresh token for a new access token + refresh token pair (token rotation).
+   * The old refresh token is immediately invalidated, enabling per-device revocation.
+   */
+  fastify.post('/refresh', async (req: FastifyRequest, reply: FastifyReply) => {
+    const parseResult = RefreshSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      throw { statusCode: 422, message: parseResult.error.flatten() };
+    }
+    const { refreshToken } = parseResult.data;
     const userId = await redis.get(`refresh_token:${refreshToken}`);
     if (!userId) {
-      return next(new ProblemDetail({
+      throw new ProblemDetail({
         type: 'unauthorized',
         title: 'Invalid refresh token',
         status: 401,
         detail: 'The refresh token is invalid or has expired.',
-      }));
+      });
     }
     await redis.del(`refresh_token:${refreshToken}`);
     const user = await prisma.<%= authModelLower %>.findUnique({ where: { id: userId as any } });
     if (!user) {
-      return next(new ProblemDetail({
+      throw new ProblemDetail({
         type: 'unauthorized',
         title: 'User not found',
         status: 401,
         detail: 'The user associated with this refresh token no longer exists.',
-      }));
+      });
     }
-    const newAccessToken = jwt.sign(
+    const newAccessToken = fastify.jwt.sign(
       {
         sub: userId,
 <% if (roleField) { -%>
@@ -113,29 +104,24 @@ router.post('/refresh', validate(RefreshSchema), async (req, res, next) => {
         <%= identifierField %>: user.<%= identifierField %>,
 <% } -%>
       },
-      env.JWT_SECRET,
-      { expiresIn: ACCESS_TOKEN_TTL }
+      { expiresIn: env.ACCESS_TOKEN_TTL ?? '15m' }
     );
     const newRefreshToken = crypto.randomUUID();
     await redis.set(`refresh_token:${newRefreshToken}`, userId, { EX: REFRESH_TOKEN_TTL });
-    sendSuccess(res, { accessToken: newAccessToken, refreshToken: newRefreshToken });
-  } catch (error) {
-    next(error);
-  }
-});
+    reply.send({ data: { accessToken: newAccessToken, refreshToken: newRefreshToken } });
+  });
 
-/**
- * POST /api/v1/auth/logout
- * Revoke a refresh token. The associated device session is terminated immediately.
- */
-router.post('/logout', validate(RefreshSchema), async (req, res, next) => {
-  try {
-    const { refreshToken } = req.body as z.infer<typeof RefreshSchema>;
+  /**
+   * POST /api/v1/auth/logout
+   * Revoke a refresh token. The associated device session is terminated immediately.
+   */
+  fastify.post('/logout', async (req: FastifyRequest, reply: FastifyReply) => {
+    const parseResult = RefreshSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      throw { statusCode: 422, message: parseResult.error.flatten() };
+    }
+    const { refreshToken } = parseResult.data;
     await redis.del(`refresh_token:${refreshToken}`);
-    sendNoContent(res);
-  } catch (error) {
-    next(error);
-  }
-});
-
-export { router as authRoutes };
+    reply.code(204).send();
+  });
+}

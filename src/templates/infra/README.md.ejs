@@ -1,6 +1,6 @@
 # API Server
 
-> Generated with [Backend Creator (bcm)](https://github.com/backend-creator)
+> Generated with [Backend Creator (bcm)](https://github.com/Mahmoud-s-Khedr/backgen)
 
 <% const providerLabel = provider === 'mysql' ? 'MySQL' : provider === 'sqlite' ? 'SQLite' : provider === 'mongodb' ? 'MongoDB' : 'PostgreSQL'; -%>
 A production-ready Express.js REST API with TypeScript, Prisma ORM (<%= providerLabel %>), and auto-generated Swagger documentation.
@@ -85,11 +85,21 @@ GET /api/resource?page=1&limit=20&sort=createdAt&order=desc&filter[field]=value&
 | \`npm run seed\` | Seed the database |
 | \`npm run studio\` | Open Prisma Studio |
 
+The seed script respects model dependencies, handles custom/composite FK mappings,
+and prints one sample auth login per auth model. Seeded auth passwords default to
+\`SeedPassword123!\`. Optional cyclic/self relations are left unset; required
+cyclic/self relations fail fast before cleanup.
+
 ## Docker
 
 \`\`\`bash
 docker-compose up
 \`\`\`
+
+Docker startup bootstraps the schema automatically before the server starts.
+If Prisma migration directories already exist, the container runs \`prisma migrate deploy\`.
+If no real migration directories exist yet, it falls back to \`prisma db push\`
+so fresh generated projects can still boot in Docker.
 
 ## Project Structure
 
@@ -111,4 +121,4 @@ openapi.json      OpenAPI 3.0 specification
 
 ---
 
-*Bootstrapped with [Backend Creator (bcm)](https://github.com/backend-creator)*
+*Bootstrapped with [Backend Creator (bcm)](https://github.com/Mahmoud-s-Khedr/backgen)*

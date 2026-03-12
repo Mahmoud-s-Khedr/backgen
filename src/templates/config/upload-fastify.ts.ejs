@@ -1,0 +1,77 @@
+import path from 'path';
+import fs from 'fs';
+import { promises as fsp } from 'fs';
+import { randomUUID } from 'crypto';
+import { pipeline } from 'stream/promises';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import type { MultipartFile } from '@fastify/multipart';
+import { env } from './env.js';
+
+export interface UploadFieldConfig {
+  dest: string;
+  maxSize?: number;
+  mimeTypes?: string[];
+}
+
+let s3Client: S3Client | null = null;
+
+function getS3Client(): S3Client {
+  if (!s3Client) {
+    s3Client = new S3Client({
+      region: env.S3_REGION ?? 'auto',
+      ...(env.S3_ENDPOINT ? { endpoint: env.S3_ENDPOINT } : {}),
+      credentials: env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
+        ? { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY }
+        : undefined,
+    });
+  }
+  return s3Client;
+}
+
+function assertUploadConstraints(file: MultipartFile, config: UploadFieldConfig): void {
+  if (config.mimeTypes?.length && !config.mimeTypes.includes(file.mimetype)) {
+    throw new Error(`Unsupported file type: ${file.mimetype}. Allowed: ${config.mimeTypes.join(', ')}`);
+  }
+}
+
+export async function uploadToLocal(file: MultipartFile, config: UploadFieldConfig): Promise<string> {
+  const uploadDir = path.join(env.UPLOAD_DIR ?? 'uploads', config.dest);
+  await fsp.mkdir(uploadDir, { recursive: true });
+
+  const ext = path.extname(file.filename || '');
+  const fileName = `${Date.now()}-${randomUUID().slice(0, 8)}${ext}`;
+  const targetPath = path.join(uploadDir, fileName);
+
+  const writeStream = fs.createWriteStream(targetPath);
+  await pipeline(file.file, writeStream);
+  return targetPath;
+}
+
+export async function uploadToS3(file: MultipartFile, config: UploadFieldConfig): Promise<string> {
+  const bucket = env.S3_BUCKET;
+  if (!bucket) throw new Error('S3_BUCKET environment variable is required for S3 uploads');
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of file.file) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const body = Buffer.concat(chunks);
+  const key = `${config.dest}/${Date.now()}-${randomUUID().slice(0, 8)}-${file.filename}`;
+
+  await getS3Client().send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: body,
+    ContentType: file.mimetype,
+  }));
+
+  const endpoint = env.S3_ENDPOINT ?? `https://s3.${env.S3_REGION ?? 'us-east-1'}.amazonaws.com`;
+  return `${endpoint}/${bucket}/${key}`;
+}
+
+export async function persistUpload(file: MultipartFile, config: UploadFieldConfig): Promise<string> {
+  assertUploadConstraints(file, config);
+  return env.UPLOAD_STORAGE === 's3'
+    ? uploadToS3(file, config)
+    : uploadToLocal(file, config);
+}
