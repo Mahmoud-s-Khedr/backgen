@@ -1,6 +1,6 @@
 // Example 4: User Profiles
 // Complexity: Three models with one-to-one relations
-// Demonstrates: one-to-one relations, @bcm.hidden, @bcm.writeOnly, @bcm.readonly
+// Demonstrates: one-to-one relations, @bcm.hidden, @bcm.writeOnly, @bcm.readonly, @bcm.upload
 
 datasource db {
   provider = "postgresql"
@@ -29,7 +29,8 @@ model Profile {
   firstName String
   lastName  String
   bio       String?
-  avatarUrl String?
+  /// @bcm.upload(dest: "avatars", maxSize: 2097152, mimeTypes: ["image/jpeg", "image/png", "image/webp"])
+  avatar    String?
   /// @bcm.hidden
   phoneNumber String?
   user      User    @relation(fields: [userId], references: [id])

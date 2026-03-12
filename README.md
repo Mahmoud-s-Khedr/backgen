@@ -1,6 +1,6 @@
 # Backgen
 
-> Prisma-to-Backend code generation tool by **Mahmoud Khedr**.
+> Generate a production-ready REST API backend from a Prisma schema and `/// @bcm.*` directives.
 
 [![npm](https://img.shields.io/npm/v/prisma-backgen)](https://www.npmjs.com/package/prisma-backgen)
 [![CI](https://github.com/Mahmoud-s-Khedr/backgen/actions/workflows/ci.yml/badge.svg)](https://github.com/Mahmoud-s-Khedr/backgen/actions/workflows/ci.yml)
@@ -8,112 +8,149 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js >= 18](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](package.json)
 
-## Live Demo
+Backgen turns a Prisma schema into a structured Express or Fastify codebase with controllers, services, repositories, DTOs, route tests, OpenAPI output, and deployable infra files.
 
-- Local monolithic playground: `http://localhost:4173`
+## Why Backgen
 
-## What This Project Solves
-
-When teams start from a Prisma schema, they still spend significant time building repetitive backend scaffolding (CRUD routes, validation, auth wiring, docs, infra templates).
-
-**Backgen** automates that path by generating a structured Express + TypeScript API from Prisma models and `/// @bcm.*` directives.
-
-## Key Engineering Highlights
-
-- Schema parser + directive engine for API behavior control.
-- Template-based code generation for controllers/services/routes/DTOs/tests/infra.
-- Selector-aware generation (single + composite selectors).
-- Nested relation generation with selector-aware connect/create payload support for singular and list relations.
-- Fail-fast validation for unsafe schema configurations.
-- Hard validation for `@bcm.softDelete` models requiring `deletedAt DateTime?`.
-- Generated route tests use mocked Prisma delegates, so `npm test` does not require a live database.
-- CLI machine-readable mode (`--json`) for tool integration.
-- CLI-backed monolithic playground service for consistent generation behavior.
-
-## Architecture Snapshot
-
-1. **CLI Engine** (`src/cli.ts`, `src/commands/*`)
-- Parses schema, validates constraints, generates project files.
-- Supports human output and structured JSON output.
-
-2. **Generation Core** (`src/parser/*`, `src/generator/*`, `src/templates/*`)
-- Converts Prisma AST + directives into typed Express backend scaffolding.
-
-3. **Web Playground** (`packages/playground`)
-- React UI for schema editing and generated file preview.
-- Express server executes real CLI (`bcm generate --dry-run --json`) via `/api/generate`.
-- Kept as a standalone package rather than an npm workspace.
+- Generates CRUD modules from Prisma models, including selector-aware item routes for `@id`, `@@id`, `@unique`, and `@@unique`.
+- Uses schema directives to control auth, RBAC, soft delete, caching, uploads, searchable fields, and nested relation inputs.
+- Produces route tests that mock Prisma delegates, so generated `npm test` does not require a database.
+- Ships a CLI-backed playground package that uses the same generation pipeline as the published CLI.
 
 ## Quick Start
 
-### CLI
 ```bash
 npm install -g prisma-backgen
 
 bcm init my-api
 cd my-api
+
 # edit prisma/schema.prisma
+bcm validate --schema ./prisma/schema.prisma
 bcm generate --schema ./prisma/schema.prisma --output . --force
-# conflict-safe partial regeneration:
-bcm generate --schema ./prisma/schema.prisma --output . --only routes
+
+npm install
+cp .env.example .env
+npx prisma migrate dev --name init
+npm run dev
 ```
 
-Notes:
-- `@bcm.softDelete` models must declare `deletedAt DateTime?`.
-- Generated auth remains JWT access-token based; refresh-token flows are not scaffolded.
-- `--only` without `--force` aborts if a targeted file would be overwritten with different content.
+Use `--framework fastify` to target Fastify instead of the default Express output.
 
-### Local Playground (CLI-backed monolith)
+## Canonical Example Schema
+
+```prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+/// @bcm.authModel
+model User {
+  id        String   @id @default(cuid())
+  /// @bcm.identifier
+  email     String   @unique
+  /// @bcm.password
+  password  String
+  role      Role     @default(USER)
+  posts     Post[]
+  /// @bcm.readonly
+  createdAt DateTime @default(now())
+}
+
+/// @bcm.protected
+/// @bcm.softDelete
+/// @bcm.cache(ttl: 300)
+model Post {
+  id        String    @id @default(cuid())
+  /// @bcm.searchable
+  title     String
+  content   String?
+  /// @bcm.hidden
+  authorId  String
+  /// @bcm.nested
+  author    User      @relation(fields: [authorId], references: [id])
+  deletedAt DateTime?
+  /// @bcm.readonly
+  createdAt DateTime  @default(now())
+}
+```
+
+## Generated API Snapshot
+
+For the schema above, Backgen emits routes under `/api/v1` plus shared service endpoints:
+
+- `GET /api/v1/posts`
+- `POST /api/v1/posts`
+- `GET /api/v1/posts/{id}`
+- `PUT /api/v1/posts/{id}`
+- `PATCH /api/v1/posts/{id}`
+- `DELETE /api/v1/posts/{id}`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/logout`
+- `GET /health`
+- Swagger UI at `/api/docs`
+
+Generated auth uses access tokens plus refresh-token rotation when an `@bcm.authModel` is present. `ACCESS_TOKEN_TTL` defaults to `15m`, and Redis is required for auth sessions and for `@bcm.cache`.
+
+## Output Snapshot
+
+```text
+src/
+  app.ts
+  server.ts
+  config/
+  middlewares/
+  modules/
+    auth/
+    user/
+    post/
+  utils/
+prisma/
+  seed.ts
+openapi.json
+Dockerfile
+docker-compose.yml
+.env.example
+README.md
+package.json
+```
+
+## Documentation
+
+- [Documentation Hub](docs/README.md)
+- [Usage Guide](docs/USAGE.md)
+- [Directive Reference](docs/directives.md)
+- [Advanced Patterns](docs/advanced.md)
+- [Limitations](docs/limitations.md)
+- [Generated Code Walkthrough](docs/generated-code.md)
+- [Architecture Guide](docs/architecture.md)
+- [Playground README](packages/playground/README.md)
+
+## Playground
+
+The local playground is a separate package that shells out to the real CLI in `--dry-run --json` mode.
+
 ```bash
-# from repo root
 npm ci
 npm run build
-
 cd packages/playground
 npm ci
 npm run dev
 ```
 
-## Screenshots
-
-### Playground (Light)
-![Backgen Playground Light](assets/screenshots/playground-light-desktop.png)
-
-### Playground (Dark)
-![Backgen Playground Dark](assets/screenshots/playground-dark-desktop.png)
-
-### Playground (Mobile)
-![Backgen Playground Mobile](assets/screenshots/playground-mobile.png)
-
-## Results & Proof
-
-Evidence-backed signals from this repository:
-
-- Root quality checks:
-  - `npm run lint`
-  - `npm test`
-  - `npm run build`
-- Playground checks:
-  - `npm --prefix packages/playground run typecheck`
-  - `npm --prefix packages/playground run test`
-  - `npm --prefix packages/playground run build`
-- CLI JSON proof sample:
-  - `assets/screenshots/cli-generate-json-sample.txt`
-- Example matrix runner:
-  - `scripts/run-examples.js`
-- Supported providers in generation templates/config:
-  - PostgreSQL, MySQL, SQLite, MongoDB
-
-## Documentation
-
-- [Usage Guide](docs/USAGE.md) — installation, CLI reference, directive reference, generated project structure
-
-## About the Author
-
-**Mahmoud Khedr**
-
-- GitHub: [Mahmoud-s-Khedr](https://github.com/Mahmoud-s-Khedr)
+It serves the monolithic playground at `http://localhost:4173`.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT

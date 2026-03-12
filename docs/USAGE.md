@@ -1,69 +1,67 @@
-# prisma-backgen — Usage Guide
+# prisma-backgen Usage Guide
 
-Generate a complete, production-ready Express.js REST API from a Prisma schema file.
-
----
+Generate a REST API backend from a Prisma schema with the `bcm` CLI.
 
 ## Installation
 
 ```bash
-# Global install (recommended)
+# Global install
 npm install -g prisma-backgen
 bcm --version
 
-# One-off with npx (no install needed)
+# One-off generation without installing globally
 npx prisma-backgen generate --schema ./prisma/schema.prisma --output ./backend
 ```
 
----
+Node.js `>=18` is required.
 
 ## Quick Start
 
 ```bash
-# 1. Scaffold a new project
+# 1. Create a starter project
 bcm init my-api
 cd my-api
 
-# 2. Edit your schema
-#    Open prisma/schema.prisma and define your models with @bcm.* directives
-#    (see Directive Reference below)
+# 2. Edit prisma/schema.prisma
 
-# 3. Generate the backend
-bcm generate --schema ./prisma/schema.prisma --output .
+# 3. Validate before writing files
+bcm validate --schema ./prisma/schema.prisma
 
-# 4. Install deps and run
+# 4. Generate into the current project
+bcm generate --schema ./prisma/schema.prisma --output . --force
+
+# 5. Install generated dependencies and run
 npm install
+cp .env.example .env
 npx prisma migrate dev --name init
 npm run dev
 ```
 
-The generated project starts on `http://localhost:3000`.
-Swagger UI is available at `http://localhost:3000/api-docs`.
-
----
+For MongoDB, use `npx prisma db push` instead of `prisma migrate dev`.
 
 ## CLI Reference
 
 ### `bcm init <project-name>`
 
-Scaffold a new project directory with a starter Prisma schema, `tsconfig.json`, and `package.json`.
+Creates a new directory with a starter Prisma schema and minimal project files.
 
 ```bash
 bcm init my-api
 ```
 
-Creates:
-- `prisma/schema.prisma` — starter schema with a `User` model and directive examples
-- `src/` — empty source directory
-- `package.json`, `tsconfig.json`, `.gitignore`
+Scaffolded files:
 
-> The directory must not already exist.
+- `prisma/schema.prisma`
+- `src/`
+- `package.json`
+- `tsconfig.json`
+- `.gitignore`
 
----
+The target directory must not already exist.
 
 ### `bcm generate`
 
-Generate a full Express API from a Prisma schema.
+Generates backend code from a Prisma schema.
 
 ```bash
 bcm generate --schema <path> --output <path> [options]
@@ -71,199 +69,252 @@ bcm generate --schema <path> --output <path> [options]
 
 | Flag | Short | Description | Default |
 |------|-------|-------------|---------|
-| `--schema <path>` | `-s` | Path to Prisma schema file | required |
-| `--output <path>` | `-o` | Output directory for generated code | required |
-| `--dry-run` | | Preview files without writing anything | `false` |
-| `--force` | | Overwrite existing output directory | `false` |
-| `--only <part>` | | Generate only one part of the output | — |
-| `--json` | | Machine-readable JSON output | `false` |
+| `--schema <path>` | `-s` | Path to the Prisma schema file | required |
+| `--output <path>` | `-o` | Output directory for generated files | required |
+| `--dry-run` | | Preview files without writing them | `false` |
+| `--only <part>` | | Generate only one category | none |
+| `--json` | | Emit machine-readable JSON only | `false` |
+| `--force` | | Overwrite targeted output | `false` |
+| `--framework <name>` | | `express` or `fastify` | `express` |
 
-**`--only` accepted values:** `routes`, `config`, `middleware`, `utils`, `app`, `infra`, `prisma`, `swagger`
+Accepted `--only` values:
 
-**Conflict safety with `--only`:** Without `--force`, `--only` aborts if the targeted file already exists with different content. This prevents accidental overwrites during partial regeneration. Use `--force` to overwrite.
+- `routes`
+- `config`
+- `middleware`
+- `utils`
+- `app`
+- `infra`
+- `prisma`
+- `swagger`
 
-**`--json` output format:**
+Important behavior:
+
+- Full generation into a non-empty directory requires `--force`.
+- `--only` without `--force` aborts if any targeted file would be overwritten with different content.
+- `--json` includes `endpointCount` only for full generation, not for `--only` runs.
+
+Examples:
+
+```bash
+# Full Express generation
+bcm generate --schema ./prisma/schema.prisma --output . --force
+
+# Full Fastify generation
+bcm generate --schema ./prisma/schema.prisma --output . --force --framework fastify
+
+# Preview without writing
+bcm generate --schema ./prisma/schema.prisma --output . --dry-run
+
+# Regenerate only OpenAPI
+bcm generate --schema ./prisma/schema.prisma --output . --only swagger --force
+```
+
+Success JSON shape:
+
 ```json
 {
   "success": true,
-  "files": ["src/user/user.routes.ts", "..."],
-  "models": 3,
-  "enums": 1,
-  "endpoints": 18
+  "warnings": [],
+  "modelCount": 2,
+  "enumCount": 1,
+  "files": [
+    {
+      "path": "src/modules/post/post.routes.ts",
+      "content": "...",
+      "sizeBytes": 2048
+    }
+  ],
+  "generatedAt": "2026-03-12T12:00:00.000Z",
+  "endpointCount": 15
 }
 ```
 
----
+Failure JSON shape:
+
+```json
+{
+  "success": false,
+  "error": {
+    "stage": "write",
+    "message": "Output directory \".\" is not empty."
+  }
+}
+```
+
+### `bcm validate`
+
+Parses a schema and runs generator validation without writing files.
+
+```bash
+bcm validate --schema <path> [--json]
+```
+
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--schema <path>` | `-s` | Path to the Prisma schema file | required |
+| `--json` | | Emit machine-readable JSON only | `false` |
+
+Exit codes:
+
+- `0`: schema is valid
+- `1`: one or more validation errors were found
+
+Validation JSON shape:
+
+```json
+{
+  "valid": false,
+  "modelCount": 3,
+  "enumCount": 1,
+  "errors": [
+    {
+      "severity": "error",
+      "model": "Post",
+      "directive": "softDelete",
+      "message": "Model \"Post\" uses @bcm.softDelete but is missing field \"deletedAt\". Expected: deletedAt DateTime?"
+    }
+  ],
+  "warnings": []
+}
+```
+
+Current validation categories:
+
+1. RBAC models using `@bcm.auth(...)` must have an auth model with `@bcm.identifier`, `@bcm.password`, and a scalar `role` field.
+2. `@bcm.softDelete` models must declare `deletedAt DateTime?`.
+3. Hidden required foreign keys must have a nested input path or be made optional/defaulted.
+4. Required `@bcm.readonly` scalar fields are invalid.
+5. Models cannot mix required nested and non-nested relation input modes.
 
 ### `bcm eject <path>`
 
-Strip all `/// @bcm.*` directive comments from generated files, producing clean output with no dependency on the CLI.
+Removes `/// @bcm.*` directive comments from generated source code.
 
 ```bash
-bcm eject ./backend/src
+bcm eject ./backend
 ```
 
----
+Use this when you want the generated project to be fully independent of the CLI. It is effectively one-way: once directives are stripped, re-running generation cannot recover them from the ejected files.
 
-## Directive Reference
+## Directive Surface
 
-Directives are triple-slash comments (`///`) placed on the line immediately before a model or field definition in your Prisma schema.
+Backgen currently recognizes the following directives.
 
-### Model-level directives
+Model directives:
 
-Place these on the line directly before `model ModelName {`:
+- `@bcm.protected`
+- `@bcm.softDelete`
+- `@bcm.auth(roles: [...])`
+- `@bcm.authModel`
+- `@bcm.cache(ttl: N)`
 
-| Directive | Effect |
-|-----------|--------|
-| `/// @bcm.protected` | All mutation routes (`POST`, `PUT`, `PATCH`, `DELETE`) require a valid JWT |
-| `/// @bcm.auth(roles: [ROLE1, ROLE2])` | Mutations require JWT + role check via `authorize()` middleware |
-| `/// @bcm.softDelete` | `DELETE` sets `deletedAt` instead of hard-deleting. Model **must** have a `deletedAt DateTime?` field. |
+Field directives:
 
-### Field-level directives
+- `@bcm.hidden`
+- `@bcm.readonly`
+- `@bcm.writeOnly`
+- `@bcm.searchable`
+- `@bcm.nested`
+- `@bcm.identifier`
+- `@bcm.password`
+- `@bcm.upload(...)`
 
-Place these on the line directly before the field:
+See [Directive Reference](directives.md) for exact placement rules and behavior.
 
-| Directive | Effect |
-|-----------|--------|
-| `/// @bcm.hidden` | Field excluded from all response schemas (never returned to client) |
-| `/// @bcm.readonly` | Field excluded from Create/Update DTOs — included in responses only |
-| `/// @bcm.writeOnly` | Field included in Create/Update DTOs but excluded from responses |
-| `/// @bcm.searchable` | Field included in full-text search (via `?q=` query parameter) |
-| `/// @bcm.nested` | Relation field: generates a `Model_RelationInput` union (create or connect) instead of a raw FK id |
+## Generated HTTP Surface
 
-### Example schema
+Backgen mounts generated model routes under `/api/v1`.
 
-```prisma
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+For a model with a unique selector, the generated CRUD surface is:
 
-generator client {
-  provider = "prisma-client-js"
-}
+- `GET /api/v1/<models>`
+- `POST /api/v1/<models>`
+- `GET /api/v1/<models>/{selector}`
+- `PUT /api/v1/<models>/{selector}`
+- `PATCH /api/v1/<models>/{selector}`
+- `DELETE /api/v1/<models>/{selector}`
 
-model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  /// @bcm.hidden
-  password  String
-  role      Role     @default(USER)
-  posts     Post[]
-  createdAt DateTime @default(now())
-}
+Models without any selector (`@id`, `@@id`, `@unique`, `@@unique`) generate only list and create routes.
 
-enum Role {
-  USER
-  ADMIN
-}
+Shared routes:
 
-/// @bcm.auth(roles: [ADMIN, USER])
-/// @bcm.softDelete
-model Post {
-  id        Int       @id @default(autoincrement())
-  /// @bcm.searchable
-  title     String
-  content   String?
-  deletedAt DateTime?
-  /// @bcm.nested
-  author    User      @relation(fields: [authorId], references: [id])
-  authorId  Int
-  createdAt DateTime  @default(now())
-}
+- `GET /health`
+- Swagger UI at `GET /api/docs`
+
+Auth routes are generated when an `@bcm.authModel` has both `@bcm.identifier` and `@bcm.password`:
+
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/logout`
+
+Login returns `data.accessToken` and `data.refreshToken`. `ACCESS_TOKEN_TTL` defaults to `15m`.
+
+## Runtime Configuration
+
+The generated `.env.example` reflects the schema and chosen templates.
+
+Always present:
+
+- `NODE_ENV`
+- `PORT`
+- `DATABASE_URL`
+- `CORS_ORIGIN`
+- `LOG_LEVEL`
+- `RATE_LIMIT_MAX`
+
+Conditionally generated:
+
+- `JWT_SECRET` when any model uses `@bcm.authModel`, `@bcm.protected`, or `@bcm.auth(...)`
+- `ACCESS_TOKEN_TTL` when an auth model exists
+- `REDIS_URL` when an auth model exists or any model uses `@bcm.cache`
+- Upload storage variables when any field uses `@bcm.upload(...)`
+
+Operational note:
+
+- Redis/Valkey is required both for auth refresh-token sessions and for `@bcm.cache`.
+
+## Generated Project Snapshot
+
+Common output files:
+
+```text
+src/
+  app.ts
+  server.ts
+  config/
+  middlewares/
+  modules/
+  utils/
+prisma/
+  seed.ts
+openapi.json
+Dockerfile
+docker-compose.yml
+.env.example
+README.md
+package.json
+tsconfig.json
+vitest.config.ts
 ```
 
----
+Generated package scripts:
 
-## Generated Project Structure
+- `npm run dev`
+- `npm run build`
+- `npm start`
+- `npm test`
+- `npm run test:watch`
+- `npm run migrate`
+- `npm run seed`
+- `npm run studio`
+- `npm run generate`
 
-Running `bcm generate` produces the following layout:
+See [Generated Code Walkthrough](generated-code.md) for file responsibilities.
 
-```
-<output>/
-├── src/
-│   ├── app.ts                          # Express app with middleware chain + request tracing
-│   ├── server.ts                       # HTTP server entry point
-│   ├── config/
-│   │   ├── database.ts                 # Prisma Client singleton
-│   │   ├── env.ts                      # Environment variable validation
-│   │   ├── cors.ts                     # CORS configuration
-│   │   ├── logger.ts                   # pino structured logger
-│   │   └── swagger.ts                  # OpenAPI/Swagger UI setup
-│   ├── middleware/
-│   │   ├── auth.middleware.ts           # JWT verification + role guard (authorize())
-│   │   ├── error.middleware.ts          # RFC 7807 Problem Detail error handler
-│   │   ├── rate-limit.middleware.ts     # express-rate-limit
-│   │   └── validation.middleware.ts     # Zod body/query validation
-│   ├── utils/
-│   │   ├── response.ts                  # Standard { success, data, meta } response helpers
-│   │   └── query-builder.ts             # Pagination, filtering, sorting, search helpers
-│   ├── auth/
-│   │   └── auth.routes.ts               # POST /auth/login — issues JWT access token
-│   └── <Model>/                         # One directory per Prisma model (e.g. user/, post/)
-│       ├── <model>.routes.ts            # Express router
-│       ├── <model>.controller.ts        # Request/response handling
-│       ├── <model>.service.ts           # Prisma queries + business logic
-│       ├── <model>.dto.ts               # Zod schemas: CreateSchema, PatchSchema, ResponseSchema
-│       └── <model>.test.ts              # Vitest integration tests (mocked Prisma)
-├── prisma/
-│   └── seed.ts                          # @faker-js/faker seed script (topologically sorted)
-├── .env.example                         # Environment variable template
-├── docker-compose.yml                   # Database + app services (provider-aware)
-├── Dockerfile                           # Multi-stage production image
-├── .github/workflows/ci.yml             # GitHub Actions CI (provider-aware)
-├── package.json                         # Scripts: dev, build, test, migrate, seed, studio
-├── tsconfig.json
-└── vitest.config.ts
-```
+## Next Reading
 
-### Generated stack
-
-| Layer | Technology |
-|-------|-----------|
-| Runtime | Node.js ≥ 18 |
-| Framework | Express 5 |
-| ORM | Prisma |
-| Validation | Zod |
-| Auth | jsonwebtoken (access token) |
-| Logging | pino + pino-http |
-| API docs | Swagger UI Express + OpenAPI 3 |
-| Tests | Vitest (with globals, mocked Prisma) |
-| Compression | compression middleware |
-| Rate limiting | express-rate-limit |
-| Infra | Docker, GitHub Actions CI |
-
-### Generated endpoints (per model)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/<models>` | List (paginated, filterable, searchable) |
-| `POST` | `/api/<models>` | Create |
-| `GET` | `/api/<models>/:id` | Get by ID |
-| `PUT` | `/api/<models>/:id` | Full update |
-| `PATCH` | `/api/<models>/:id` | Partial update |
-| `DELETE` | `/api/<models>/:id` | Delete (or soft-delete if `@bcm.softDelete`) |
-
----
-
-## Database Providers
-
-The provider is auto-detected from `datasource db { provider = "..." }` in your schema.
-Supported values and their effect:
-
-| Provider | docker-compose | CI DB service | Notes |
-|----------|---------------|---------------|-------|
-| `postgresql` | postgres image | `postgres` service | Default; full feature support |
-| `mysql` | mysql image | `mysql` service | Full feature support |
-| `sqlite` | no DB service | no DB service | `DATABASE_URL=file:./dev.db` |
-| `mongodb` | mongo image | `mongodb` service | Relation handling differs from relational providers |
-
----
-
-## Notes & Limitations
-
-- **Auth**: Generates JWT access-token only. Refresh-token flows are not scaffolded.
-- **`@bcm.softDelete`**: Requires a `deletedAt DateTime?` field on the model — generation fails with a clear error if missing.
-- **`--only` + `--force`**: Using `--force` with `--only` overwrites the targeted file unconditionally.
-- **MongoDB**: Some relational features (`@bcm.nested`, cross-model relations) may behave differently. Test your schema before using in production.
-- **Eject**: After ejecting, `@bcm.*` directives are stripped and re-running `bcm generate` will not be able to detect previous directives from comments.
+- [Directive Reference](directives.md)
+- [Advanced Patterns](advanced.md)
+- [Limitations](limitations.md)
+- [Generated Code Walkthrough](generated-code.md)

@@ -1,6 +1,6 @@
 // Example 8: E-Commerce Platform
 // Complexity: Nine models with complex relations and enums
-// Demonstrates: enums, @bcm.authModel, @bcm.identifier, @bcm.password, @bcm.searchable, @bcm.readonly, @bcm.hidden, @bcm.softDelete, @bcm.nested, @bcm.auth
+// Demonstrates: enums, @bcm.authModel, @bcm.identifier, @bcm.password, @bcm.searchable, @bcm.readonly, @bcm.hidden, @bcm.softDelete, @bcm.nested, @bcm.auth, @bcm.cache
 
 datasource db {
   provider = "postgresql"
@@ -13,12 +13,12 @@ generator client {
 
 /// @bcm.authModel
 model AdminUser {
-  id       String @id @default(uuid())
+  id       String    @id @default(uuid())
   /// @bcm.identifier
-  email    String @unique
+  email    String    @unique
   /// @bcm.password
   password String
-  role     String @default("ADMIN")
+  role     AdminRole @default(ADMIN)
 }
 
 model Customer {
@@ -50,6 +50,7 @@ model Address {
   @@index([customerId])
 }
 
+/// @bcm.cache(ttl: 300)
 /// @bcm.softDelete
 model Product {
   id          String      @id @default(uuid())
@@ -74,6 +75,7 @@ model Product {
   @@index([categoryId])
 }
 
+/// @bcm.cache(ttl: 3600)
 model Category {
   id       String    @id @default(uuid())
   /// @bcm.searchable
@@ -170,4 +172,8 @@ enum OrderStatus {
 enum DiscountType {
   PERCENTAGE
   FIXED_AMOUNT
+}
+
+enum AdminRole {
+  ADMIN
 }

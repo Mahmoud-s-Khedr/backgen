@@ -1,0 +1,95 @@
+// Example 13: Media Catalog
+// Complexity: Four models with auth, caching, and file uploads
+// Demonstrates: @bcm.cache, @bcm.upload, @bcm.authModel, @bcm.auth(roles), @bcm.softDelete, @bcm.nested, @bcm.searchable, @bcm.readonly
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  EDITOR
+  ADMIN
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  DOCUMENT
+  AUDIO
+}
+
+/// @bcm.authModel
+model User {
+  id        String    @id @default(uuid())
+  /// @bcm.identifier
+  email     String    @unique
+  /// @bcm.password
+  password  String
+  role      Role      @default(USER)
+  /// @bcm.upload(dest: "avatars", maxSize: 2097152, mimeTypes: ["image/jpeg", "image/png", "image/webp"])
+  avatar    String?
+  items     MediaItem[]
+  /// @bcm.readonly
+  createdAt DateTime  @default(now())
+}
+
+/// @bcm.cache(ttl: 3600)
+model Category {
+  id          String      @id @default(uuid())
+  /// @bcm.searchable
+  name        String      @unique
+  description String?
+  items       MediaItem[]
+  /// @bcm.readonly
+  createdAt   DateTime    @default(now())
+}
+
+/// @bcm.auth(roles: [EDITOR, ADMIN])
+/// @bcm.cache(ttl: 600)
+/// @bcm.softDelete
+model MediaItem {
+  id          String      @id @default(uuid())
+  /// @bcm.searchable
+  title       String
+  /// @bcm.searchable
+  description String?
+  type        MediaType   @default(IMAGE)
+  /// @bcm.upload(dest: "media", maxSize: 52428800, mimeTypes: ["image/jpeg", "image/png", "image/webp", "video/mp4", "application/pdf"])
+  fileUrl     String?
+  mimeType    String?
+  sizeBytes   Int?
+  isPublic    Boolean     @default(true)
+  /// @bcm.hidden
+  uploaderId  String
+  /// @bcm.nested
+  uploader    User        @relation(fields: [uploaderId], references: [id])
+  category    Category?   @relation(fields: [categoryId], references: [id])
+  categoryId  String?
+  thumbnails  Thumbnail[]
+  deletedAt   DateTime?
+  /// @bcm.readonly
+  createdAt   DateTime    @default(now())
+  /// @bcm.readonly
+  updatedAt   DateTime    @updatedAt
+
+  @@index([uploaderId])
+  @@index([categoryId])
+}
+
+model Thumbnail {
+  id          String    @id @default(uuid())
+  width       Int
+  height      Int
+  /// @bcm.upload(dest: "thumbnails", maxSize: 524288, mimeTypes: ["image/jpeg", "image/png", "image/webp"])
+  fileUrl     String?
+  mediaItem   MediaItem @relation(fields: [mediaItemId], references: [id])
+  mediaItemId String
+
+  @@index([mediaItemId])
+}
