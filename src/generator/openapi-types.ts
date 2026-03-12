@@ -39,6 +39,7 @@ export interface OpenApiRequestBodyObject {
 export interface OpenApiOperationObject {
     tags?: string[];
     summary?: string;
+    description?: string;
     parameters?: OpenApiParameterObject[];
     requestBody?: OpenApiRequestBodyObject;
     responses: Record<string, OpenApiResponseObject>;

@@ -298,6 +298,30 @@ model User {
         }
     });
 
+    it('returns generate-stage JSON error for an invalid framework value', async () => {
+        const workspace = await createSchemaWorkspace(SIMPLE_SCHEMA, 'backgen-cli-invalid-framework-');
+        const stdout = captureStdout();
+        mockProcessExitToThrow();
+
+        try {
+            await expect(generateCommand({
+                schema: workspace.schemaPath,
+                output: workspace.outputPath,
+                dryRun: true,
+                force: true,
+                json: true,
+                framework: 'koa' as never,
+            })).rejects.toThrow('process.exit(1)');
+
+            const parsed = JSON.parse(stdout.text());
+            expect(parsed.success).toBe(false);
+            expect(parsed.error.stage).toBe('generate');
+            expect(parsed.error.message).toContain('Invalid framework "koa"');
+        } finally {
+            await workspace.cleanup();
+        }
+    });
+
     it('keeps human-readable dry-run output when JSON mode is disabled', async () => {
         const workspace = await createSchemaWorkspace(SIMPLE_SCHEMA, 'backgen-cli-human-output-');
         const logs = captureConsole('log');
@@ -448,4 +472,5 @@ model User {
             await workspace.cleanup();
         }
     });
+
 });

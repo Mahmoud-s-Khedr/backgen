@@ -30,10 +30,23 @@ function generateOpenApiSpec(schema: ParsedSchema): OpenApiDocument {
     // Auth login endpoint (when @bcm.authModel is present)
     const authModel = schema.models.find(m => m.isAuthModel);
     if (authModel && authModel.identifierField && authModel.passwordField) {
-        paths['/api/auth/login'] = {
+        const authTokenResponseSchema: OpenApiSchema = {
+            type: 'object',
+            properties: {
+                data: {
+                    type: 'object',
+                    properties: {
+                        accessToken: { type: 'string', description: 'Short-lived JWT access token' },
+                        refreshToken: { type: 'string', format: 'uuid', description: 'Long-lived refresh token (store securely)' },
+                    },
+                },
+            },
+        };
+
+        paths['/api/v1/auth/login'] = {
             post: {
                 tags: ['Auth'],
-                summary: 'Login and get JWT token',
+                summary: 'Login — get access + refresh token',
                 requestBody: {
                     required: true,
                     content: {
@@ -50,25 +63,57 @@ function generateOpenApiSpec(schema: ParsedSchema): OpenApiDocument {
                     },
                 },
                 responses: {
-                    '200': {
-                        description: 'Login successful',
-                        content: {
-                            'application/json': {
-                                schema: {
-                                    type: 'object',
-                                    properties: {
-                                        data: {
-                                            type: 'object',
-                                            properties: {
-                                                token: { type: 'string', description: 'JWT bearer token' },
-                                            },
-                                        },
-                                    },
-                                },
+                    '200': { description: 'Login successful', content: { 'application/json': { schema: authTokenResponseSchema } } },
+                    '401': { description: 'Invalid credentials' },
+                    '422': { description: 'Validation error' },
+                },
+            },
+        };
+
+        paths['/api/v1/auth/refresh'] = {
+            post: {
+                tags: ['Auth'],
+                summary: 'Refresh — rotate tokens',
+                description: 'Exchange a valid refresh token for a new access + refresh token pair. The old refresh token is immediately invalidated (token rotation). Supports multiple simultaneous devices.',
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['refreshToken'],
+                                properties: { refreshToken: { type: 'string', format: 'uuid' } },
                             },
                         },
                     },
-                    '401': { description: 'Invalid credentials' },
+                },
+                responses: {
+                    '200': { description: 'Tokens rotated', content: { 'application/json': { schema: authTokenResponseSchema } } },
+                    '401': { description: 'Invalid or expired refresh token' },
+                    '422': { description: 'Validation error' },
+                },
+            },
+        };
+
+        paths['/api/v1/auth/logout'] = {
+            post: {
+                tags: ['Auth'],
+                summary: 'Logout — revoke refresh token',
+                description: 'Revoke the provided refresh token. Only the current device session is terminated; other devices remain active.',
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['refreshToken'],
+                                properties: { refreshToken: { type: 'string', format: 'uuid' } },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '204': { description: 'Logged out successfully' },
                     '422': { description: 'Validation error' },
                 },
             },
@@ -103,7 +148,7 @@ function generateOpenApiSpec(schema: ParsedSchema): OpenApiDocument {
     for (const model of schema.models) {
         const modelLower = helpers.toCamelCase(model.name);
         const modelPlural = helpers.pluralize(modelLower);
-        const basePath = `/api/${modelPlural}`;
+        const basePath = `/api/v1/${modelPlural}`;
         const tag = model.name;
         const isProtected = model.directives.includes('protected') || model.directives.includes('auth');
         const authRoles = model.authRoles ?? [];

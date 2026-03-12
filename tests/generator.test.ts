@@ -1,8 +1,15 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'fs-extra';
 import { readFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { generateProject } from '../src/generator/index.js';
 import { parsePrismaAst } from '../src/parser/prisma-ast-parser.js';
 import type { GenerateOptions, ParsedSchema } from '../src/parser/types.js';
+import { writeFiles } from '../src/generator/file-writer.js';
+import { createTempWorkspace } from './helpers/test-fs.js';
+
+const execFileAsync = promisify(execFile);
 
 const BLOG_SCHEMA = `
 datasource db {
@@ -120,7 +127,9 @@ describe('generateProject', () => {
 
             // Infra
             expect(paths).toContain('Dockerfile');
+            expect(paths).toContain('docker-entrypoint.sh');
             expect(paths).toContain('docker-compose.yml');
+            expect(paths).toContain('.dockerignore');
             expect(paths).toContain('package.json');
 
             // Prisma
@@ -130,12 +139,13 @@ describe('generateProject', () => {
             expect(paths).toContain('openapi.json');
         });
 
-        it('generates 5 files per model (controller, service, routes, dto, test)', async () => {
+        it('generates 6 files per model (repository, controller, service, routes, dto, test)', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, defaultOptions, BLOG_SCHEMA);
             const paths = files.map(f => f.path);
 
             for (const model of ['user', 'post']) {
+                expect(paths).toContain(`src/modules/${model}/${model}.repository.ts`);
                 expect(paths).toContain(`src/modules/${model}/${model}.controller.ts`);
                 expect(paths).toContain(`src/modules/${model}/${model}.service.ts`);
                 expect(paths).toContain(`src/modules/${model}/${model}.routes.ts`);
@@ -209,10 +219,10 @@ describe('generateProject', () => {
             const openapi = JSON.parse(files[0].content);
             const paths = Object.keys(openapi.paths);
 
-            expect(paths).toContain('/api/users');
-            expect(paths).toContain('/api/users/{id}');
-            expect(paths).toContain('/api/posts');
-            expect(paths).toContain('/api/posts/{id}');
+            expect(paths).toContain('/api/v1/users');
+            expect(paths).toContain('/api/v1/users/{id}');
+            expect(paths).toContain('/api/v1/posts');
+            expect(paths).toContain('/api/v1/posts/{id}');
             expect(paths).toContain('/health');
         });
 
@@ -222,10 +232,10 @@ describe('generateProject', () => {
             const openapi = JSON.parse(files[0].content);
             const paths = Object.keys(openapi.paths);
 
-            expect(paths).toContain('/api/favorites/{userId}/{listingId}');
-            expect(paths).toContain('/api/memberships/{orgId}/{scope}');
-            expect(openapi.paths['/api/favorites/{userId}/{listingId}'].get.parameters[0].name).toBe('userId');
-            expect(openapi.paths['/api/favorites/{userId}/{listingId}'].get.parameters[1].name).toBe('listingId');
+            expect(paths).toContain('/api/v1/favorites/{userId}/{listingId}');
+            expect(paths).toContain('/api/v1/memberships/{orgId}/{scope}');
+            expect(openapi.paths['/api/v1/favorites/{userId}/{listingId}'].get.parameters[0].name).toBe('userId');
+            expect(openapi.paths['/api/v1/favorites/{userId}/{listingId}'].get.parameters[1].name).toBe('listingId');
         });
 
         it('openapi.json includes enum schemas', async () => {
@@ -244,9 +254,9 @@ describe('generateProject', () => {
 
             expect(openapi.components.schemas.UserDataResponse).toBeDefined();
             expect(openapi.components.schemas.UserDataResponse.properties.data.$ref).toBe('#/components/schemas/UserResponse');
-            expect(openapi.paths['/api/users/{id}'].get.responses['200'].content['application/json'].schema.$ref)
+            expect(openapi.paths['/api/v1/users/{id}'].get.responses['200'].content['application/json'].schema.$ref)
                 .toBe('#/components/schemas/UserDataResponse');
-            expect(openapi.paths['/api/users'].post.responses['201'].content['application/json'].schema.$ref)
+            expect(openapi.paths['/api/v1/users'].post.responses['201'].content['application/json'].schema.$ref)
                 .toBe('#/components/schemas/UserDataResponse');
         });
 
@@ -270,6 +280,32 @@ describe('generateProject', () => {
             expect(postDto.content).toContain('PostWithIncludesResponseSchema');
             expect(postDto.content).toContain('Post_AuthorRelationSchema');
             expect(postDto.content).toContain('author: Post_AuthorRelationSchema');
+        });
+
+        it('dto.ts keeps scalar list fields in create and response schemas', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Article {
+  id    String   @id @default(cuid())
+  title String
+  tags  String[]
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, raw);
+            const dtoFile = files.find(f => f.path.includes('article.dto.ts'))!;
+
+            expect(dtoFile.content).toContain('tags: z.array(z.string())');
+            const responseSection = dtoFile.content.split('ResponseSchema')[1];
+            expect(responseSection).toContain('tags: z.array(z.string())');
         });
 
         it('dto.ts emits enum schema used by include relation response fields', async () => {
@@ -349,43 +385,43 @@ model Hub {
             expect(postRoutes.content).not.toContain('authenticate');
         });
 
-        it('service.ts includes soft delete logic for softDelete models', async () => {
+        it('repository.ts includes soft delete logic for softDelete models', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
-            const postService = files.find(f => f.path.includes('post.service.ts'))!;
+            const postRepo = files.find(f => f.path.includes('post.repository.ts'))!;
 
-            expect(postService.content).toContain('deletedAt');
+            expect(postRepo.content).toContain('deletedAt');
         });
 
-        it('service.ts uses findFirst for softDelete findOne', async () => {
+        it('repository.ts uses findFirst for softDelete findOne', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
-            const postService = files.find(f => f.path.includes('post.service.ts'))!;
+            const postRepo = files.find(f => f.path.includes('post.repository.ts'))!;
 
-            expect(postService.content).toContain('findFirst');
-            expect(postService.content).toContain('where: { ...this.toWhereUnique(key), deletedAt: null }');
+            expect(postRepo.content).toContain('findFirst');
+            expect(postRepo.content).toContain('where: { ...this.toWhereUnique(key), deletedAt: null }');
         });
 
-        it('service.ts guards soft-delete update/delete mutations with deletedAt null', async () => {
+        it('repository.ts guards soft-delete update/delete mutations with deletedAt null', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
-            const postService = files.find(f => f.path.includes('post.service.ts'))!;
+            const postRepo = files.find(f => f.path.includes('post.repository.ts'))!;
 
-            expect(postService.content).toContain('updateMany({ where, data: data as any })');
-            expect(postService.content).toContain('const where = { ...this.toWhereUnique(key), deletedAt: null };');
-            expect(postService.content).toContain('if (updated.count === 0)');
-            expect(postService.content).toContain('const record = await prisma.post.findFirst({ where });');
-            expect(postService.content).toContain('const deleted = await prisma.post.updateMany({');
-            expect(postService.content).toContain('if (deleted.count === 0)');
+            expect(postRepo.content).toContain('updateMany({ where, data: data as any })');
+            expect(postRepo.content).toContain('const where = { ...this.toWhereUnique(key), deletedAt: null };');
+            expect(postRepo.content).toContain('if (updated.count === 0)');
+            expect(postRepo.content).toContain('const record = await prisma.post.findFirst({ where });');
+            expect(postRepo.content).toContain('const deleted = await prisma.post.updateMany({');
+            expect(postRepo.content).toContain('if (deleted.count === 0)');
         });
 
-        it('service.ts uses findUnique for non-softDelete findOne', async () => {
+        it('repository.ts uses findUnique for non-softDelete findOne', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
-            const userService = files.find(f => f.path.includes('user.service.ts'))!;
+            const userRepo = files.find(f => f.path.includes('user.repository.ts'))!;
 
-            expect(userService.content).toContain('findUnique');
-            expect(userService.content).toContain('where: this.toWhereUnique(key)');
+            expect(userRepo.content).toContain('findUnique');
+            expect(userRepo.content).toContain('where: this.toWhereUnique(key)');
         });
 
         it('softDelete module test scaffold includes updateMany delegate and missing-record mocks', async () => {
@@ -411,29 +447,29 @@ model Hub {
             expect(userTest.content).toContain('updateMany: vi.fn(),');
         });
 
-        it('service.ts normalizes include objects without @ts-ignore', async () => {
+        it('repository.ts normalizes include objects without @ts-ignore', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, BLOG_SCHEMA);
-            const userService = files.find(f => f.path.includes('user.service.ts'))!;
-            const postService = files.find(f => f.path.includes('post.service.ts'))!;
+            const userRepo = files.find(f => f.path.includes('user.repository.ts'))!;
+            const postRepo = files.find(f => f.path.includes('post.repository.ts'))!;
 
-            expect(userService.content).toContain('private toInclude(include?: Record<string, boolean>)');
-            expect(userService.content).toContain('...(include ? { include } : {}),');
-            expect(userService.content).not.toContain('@ts-ignore');
-            expect(postService.content).not.toContain('@ts-ignore');
+            expect(userRepo.content).toContain('toInclude(include?: Record<string, boolean>)');
+            expect(userRepo.content).toContain('...(include ? { include } : {}),');
+            expect(userRepo.content).not.toContain('@ts-ignore');
+            expect(postRepo.content).not.toContain('@ts-ignore');
         });
 
         it('generates composite-key routes and where selectors', async () => {
             const schema = parsePrismaAst(COMPOSITE_KEYS_SCHEMA);
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, COMPOSITE_KEYS_SCHEMA);
             const favoriteRoutes = files.find(f => f.path.includes('favorite.routes.ts'))!;
-            const favoriteService = files.find(f => f.path.includes('favorite.service.ts'))!;
             const membershipRoutes = files.find(f => f.path.includes('membership.routes.ts'))!;
 
+            const favoriteRepo = files.find(f => f.path.includes('favorite.repository.ts'))!;
             expect(favoriteRoutes.content).toContain("router.get('/:userId/:listingId'");
-            expect(favoriteService.content).toContain('userId_listingId');
-            expect(favoriteService.content).toContain('userId: key.userId');
-            expect(favoriteService.content).toContain('listingId: key.listingId');
+            expect(favoriteRepo.content).toContain('userId_listingId');
+            expect(favoriteRepo.content).toContain('userId: key.userId');
+            expect(favoriteRepo.content).toContain('listingId: key.listingId');
 
             // falls back to first available unique composite selector when no @id exists
             expect(membershipRoutes.content).toContain("router.get('/:orgId/:scope'");
@@ -489,7 +525,7 @@ model EventLog {
 
             expect(controller.content).toContain('ALLOWED_INCLUDE_RELATIONS');
             expect(controller.content).toContain('WithIncludesResponseSchema');
-            expect(controller.content).toContain('buildQueryOptions(req.query, {');
+            expect(controller.content).toContain('buildQueryOptions(req.query as Record<string, any>, {');
             expect(controller.content).toContain('allowedIncludeRelations: ALLOWED_INCLUDE_RELATIONS');
             expect(controller.content).toContain('defaultSortField: DEFAULT_SORT_FIELD');
         });
@@ -518,6 +554,30 @@ model EventLog {
             expect(pkg.dependencies).toHaveProperty('dotenv');
             expect(pkg.dependencies).toHaveProperty('bcryptjs');
             expect(pkg.devDependencies).toHaveProperty('@faker-js/faker');
+            expect(pkg.pnpm.onlyBuiltDependencies).toEqual(['prisma', '@prisma/engines']);
+        });
+
+        it('package.json includes sqlite pnpm built dependencies when needed', async () => {
+            const raw = `
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Todo {
+  id String @id @default(uuid())
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
+            const pkgFile = files.find(f => f.path === 'package.json')!;
+            const pkg = JSON.parse(pkgFile.content);
+
+            expect(pkg.pnpm.onlyBuiltDependencies).toEqual(['prisma', '@prisma/engines', 'better-sqlite3']);
         });
 
         it('env.ts auto-loads .env and throws instead of exiting on validation failure', async () => {
@@ -537,8 +597,8 @@ model EventLog {
 
             expect(appFile.content).toContain('userRoutes');
             expect(appFile.content).toContain('postRoutes');
-            expect(appFile.content).toContain('/api/users');
-            expect(appFile.content).toContain('/api/posts');
+            expect(appFile.content).toContain('/api/v1/users');
+            expect(appFile.content).toContain('/api/v1/posts');
         });
 
         it('server.ts centralizes fatal exits in startup catch and uses dynamic imports', async () => {
@@ -668,7 +728,7 @@ model Post {
             const files = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, AUTH_SCHEMA);
             const openapi = JSON.parse(files[0].content);
 
-            const settingsPost = openapi.paths['/api/settings'].post;
+            const settingsPost = openapi.paths['/api/v1/settings'].post;
             expect(settingsPost.responses['401']).toBeDefined();
             expect(settingsPost.responses['403']).toBeDefined();
             expect(settingsPost.security).toBeDefined();
@@ -679,7 +739,7 @@ model Post {
             const files = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, AUTH_SCHEMA);
             const openapi = JSON.parse(files[0].content);
 
-            const postsPost = openapi.paths['/api/posts'].post;
+            const postsPost = openapi.paths['/api/v1/posts'].post;
             expect(postsPost.responses['401']).toBeUndefined();
             expect(postsPost.responses['403']).toBeUndefined();
         });
@@ -702,6 +762,17 @@ model Post {
             expect(authRoutes.content).toContain("import bcrypt from 'bcryptjs'");
             expect(authRoutes.content).toContain('await bcrypt.compare');
             expect(authRoutes.content).toContain('role: user.role');
+        });
+
+        it('auth route normalizes ACCESS_TOKEN_TTL to jsonwebtoken expiresIn typing', async () => {
+            const schema = getAuthSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'app' }, AUTH_SCHEMA);
+            const authRoutes = files.find(f => f.path === 'src/modules/auth/auth.routes.ts')!;
+
+            expect(authRoutes.content).toContain("import type { SignOptions } from 'jsonwebtoken'");
+            expect(authRoutes.content).toContain("function normalizeAccessTokenTtl(value: string): SignOptions['expiresIn'] {");
+            expect(authRoutes.content).toContain("const ACCESS_TOKEN_TTL = normalizeAccessTokenTtl(env.ACCESS_TOKEN_TTL ?? '15m');");
+            expect(authRoutes.content).not.toContain("{ expiresIn: env.ACCESS_TOKEN_TTL ?? '15m' }");
         });
 
         it('auth route uses strict identifier type and avoids duplicate id claim when identifier is id', async () => {
@@ -735,8 +806,11 @@ model Settings {
             const authRoutes = files.find(f => f.path === 'src/modules/auth/auth.routes.ts')!;
 
             expect(authRoutes.content).toContain('id: z.number().int()');
-            const idClaims = authRoutes.content.match(/\bid:\s*user\.id\b/g) ?? [];
-            expect(idClaims).toHaveLength(1);
+            // JWT payload uses sub (standard claim). When identifierField === 'id',
+            // the identifier is not duplicated as a separate claim.
+            expect(authRoutes.content).toContain('sub: String(user.id)');
+            const duplicateIdClaims = authRoutes.content.match(/^\s+id:\s*user\.id\b/gm) ?? [];
+            expect(duplicateIdClaims).toHaveLength(0);
         });
 
         it('auth model service hashes passwords on create/update', async () => {
@@ -749,6 +823,55 @@ model Settings {
             expect(userService.content).toContain('createData.password');
             expect(userService.content).toContain('updateData.password');
         });
+
+        it('builds a generated express project for auth models', async () => {
+            const workspace = await createTempWorkspace('backgen-express-auth-');
+            const schema = getAuthSchema();
+            const files = await generateProject(
+                schema,
+                {
+                    schema: workspace.resolve('schema.prisma'),
+                    output: workspace.root,
+                    dryRun: false,
+                    force: true,
+                    framework: 'express',
+                },
+                AUTH_SCHEMA
+            );
+
+            try {
+                await writeFiles(files, workspace.root, { mode: 'overwrite-targeted' });
+                await fs.writeFile(workspace.resolve('.env'), [
+                    'NODE_ENV=development',
+                    'PORT=3000',
+                    'DATABASE_URL="postgresql://postgres:postgres@localhost:5432/backgen_test"',
+                    'JWT_SECRET="change-me-to-a-long-random-string-at-least-32-chars"',
+                    'ACCESS_TOKEN_TTL="15m"',
+                    'REDIS_URL="redis://localhost:6379"',
+                    'CORS_ORIGIN="*"',
+                    'LOG_LEVEL="info"',
+                    'RATE_LIMIT_MAX=100',
+                ].join('\n'), 'utf8');
+
+                await execFileAsync('pnpm', ['install'], {
+                    cwd: workspace.root,
+                    timeout: 240000,
+                    maxBuffer: 1024 * 1024 * 20,
+                });
+                await execFileAsync('npx', ['prisma', 'generate'], {
+                    cwd: workspace.root,
+                    timeout: 240000,
+                    maxBuffer: 1024 * 1024 * 20,
+                });
+                await execFileAsync('npm', ['run', 'build'], {
+                    cwd: workspace.root,
+                    timeout: 240000,
+                    maxBuffer: 1024 * 1024 * 20,
+                });
+            } finally {
+                await workspace.cleanup();
+            }
+        }, 300000);
     });
 
     describe('RBAC auth model validation', () => {
@@ -791,6 +914,7 @@ model User {
   email String @unique
   /// @bcm.password
   password String
+  posts Post[]
 }
 
 /// @bcm.auth(roles: [ADMIN])
@@ -1287,6 +1411,36 @@ model Item {
             expect(dc.content).toContain('POSTGRES_DB');
         });
 
+        it('generates Redis in docker-compose for auth-only schemas', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id String @id @default(cuid())
+  /// @bcm.identifier
+  email String @unique
+  /// @bcm.password
+  password String
+  role String @default("ADMIN")
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
+            const dc = files.find(f => f.path === 'docker-compose.yml')!;
+
+            expect(dc.content).toContain('REDIS_URL=redis://redis:6379');
+            expect(dc.content).toContain('redis:\n    image: redis:7-alpine');
+            expect(dc.content).toContain('redis:\n        condition: service_started');
+        });
+
         it('generates MySQL docker-compose for mysql provider', async () => {
             const raw = makeSchema('mysql');
             const schema = parsePrismaAst(raw);
@@ -1311,6 +1465,56 @@ model Item {
             expect(dc.content).not.toContain('image:');
         });
 
+        it('generates .dockerignore to keep host artifacts out of Docker builds', async () => {
+            const raw = makeSchema('sqlite');
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
+            const dockerignore = files.find(f => f.path === '.dockerignore')!;
+
+            expect(dockerignore.content).toContain('node_modules/');
+            expect(dockerignore.content).toContain('dist/');
+            expect(dockerignore.content).toContain('.env');
+            expect(dockerignore.content).toContain('*.db');
+            expect(dockerignore.content).toContain('coverage/');
+        });
+
+        it('documents that Docker relies on .dockerignore before copying source files', async () => {
+            const raw = makeSchema('sqlite');
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
+            const dockerfile = files.find(f => f.path === 'Dockerfile')!;
+
+            expect(dockerfile.content).toContain('.dockerignore keeps host artifacts like node_modules and dist out of this copy.');
+            expect(dockerfile.content).toContain('COPY . .');
+        });
+
+        it('generates a Docker entrypoint and uses it as the container start command', async () => {
+            const raw = makeSchema('sqlite');
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
+            const dockerfile = files.find(f => f.path === 'Dockerfile')!;
+            const entrypoint = files.find(f => f.path === 'docker-entrypoint.sh')!;
+
+            expect(entrypoint.content).toContain('#!/bin/sh');
+            expect(dockerfile.content).toContain('COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh');
+            expect(dockerfile.content).toContain('RUN chmod +x /app/docker-entrypoint.sh');
+            expect(dockerfile.content).toContain('CMD ["./docker-entrypoint.sh"]');
+        });
+
+        it('bootstraps SQL providers with migrate deploy when migrations exist and db push otherwise', async () => {
+            const raw = makeSchema('postgresql');
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
+            const entrypoint = files.find(f => f.path === 'docker-entrypoint.sh')!;
+
+            expect(entrypoint.content).toContain('has_prisma_migrations()');
+            expect(entrypoint.content).toContain('Bootstrapping database schema with prisma migrate deploy...');
+            expect(entrypoint.content).toContain('npx prisma migrate deploy');
+            expect(entrypoint.content).toContain('No Prisma migrations detected; bootstrapping schema with prisma db push...');
+            expect(entrypoint.content).toContain('npx prisma db push');
+            expect(entrypoint.content).toContain('exec node dist/server.js');
+        });
+
         it('generates MongoDB docker-compose for mongodb provider', async () => {
             const raw = makeSchema('mongodb');
             const schema = parsePrismaAst(raw);
@@ -1319,6 +1523,17 @@ model Item {
 
             expect(dc.content).toContain('mongo:7');
             expect(dc.content).toContain('MONGO_INITDB_ROOT_USERNAME');
+        });
+
+        it('bootstraps MongoDB containers with prisma db push', async () => {
+            const raw = makeSchema('mongodb');
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
+            const entrypoint = files.find(f => f.path === 'docker-entrypoint.sh')!;
+
+            expect(entrypoint.content).toContain('Bootstrapping database schema with prisma db push...');
+            expect(entrypoint.content).toContain('npx prisma db push');
+            expect(entrypoint.content).not.toContain('npx prisma migrate deploy');
         });
 
         it('generates provider-aware .env.example', async () => {
@@ -1349,6 +1564,19 @@ model Item {
 
             expect(ci.content).toContain('prisma db push');
             expect(ci.content).not.toContain('prisma migrate');
+        });
+
+        it('documents Docker schema bootstrap behavior in the generated README', async () => {
+            const raw = makeSchema('sqlite');
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
+            const readme = files.find(f => f.path === 'README.md')!;
+
+            expect(readme.content).toContain('Docker startup bootstraps the schema automatically before the server starts.');
+            expect(readme.content).toContain('If Prisma migration directories already exist, the container runs');
+            expect(readme.content).toContain('prisma migrate deploy');
+            expect(readme.content).toContain('If no real migration directories exist yet, it falls back to');
+            expect(readme.content).toContain('prisma db push');
         });
     });
 
@@ -1445,13 +1673,13 @@ model Post {
             expect(postDto.content).not.toContain('author: Post_AuthorInput.optional()');
         });
 
-        it('service.ts auto-includes nested relations in create', async () => {
+        it('repository.ts auto-includes nested relations in create', async () => {
             const schema = getNestedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, NESTED_SCHEMA);
-            const postService = files.find(f => f.path.includes('post.service.ts'))!;
+            const postRepo = files.find(f => f.path.includes('post.repository.ts'))!;
 
-            expect(postService.content).toContain('include:');
-            expect(postService.content).toContain('author: true');
+            expect(postRepo.content).toContain('include:');
+            expect(postRepo.content).toContain('author: true');
         });
 
         it('test.ts payload uses nested connect for required @bcm.nested relations', async () => {
@@ -1599,15 +1827,15 @@ model Shipment {
             const schema = parsePrismaAst(raw);
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, raw);
 
-            const invoiceService = files.find(f => f.path.includes('invoice.service.ts'))!;
+            const invoiceRepo = files.find(f => f.path.includes('invoice.repository.ts'))!;
             const invoiceController = files.find(f => f.path.includes('invoice.controller.ts'))!;
-            const shipmentService = files.find(f => f.path.includes('shipment.service.ts'))!;
+            const shipmentRepo = files.find(f => f.path.includes('shipment.repository.ts'))!;
             const shipmentController = files.find(f => f.path.includes('shipment.controller.ts'))!;
 
-            expect(invoiceService.content).toContain('id: number;');
+            expect(invoiceRepo.content).toContain('id: number;');
             expect(invoiceController.content).toContain("fieldType === 'number'");
-            expect(shipmentService.content).toContain('day: Date;');
-            expect(shipmentService.content).toContain('sequence: number;');
+            expect(shipmentRepo.content).toContain('day: Date;');
+            expect(shipmentRepo.content).toContain('sequence: number;');
             expect(shipmentController.content).toContain("fieldType === 'datetime'");
         });
 
@@ -1865,10 +2093,16 @@ model Post {
             const seed = files.find(f => f.path === 'prisma/seed.ts')!;
 
             expect(seed.content).toContain('type ParentId = string | number | bigint | Date;');
+            expect(seed.content).toContain('type ParentFieldValue = ParentId | boolean | Buffer | null;');
+            expect(seed.content).toContain("import 'dotenv/config';");
+            expect(seed.content).toContain("const SOURCE_DATABASE_MODULE = '../src/config/database.ts';");
+            expect(seed.content).toContain("const DIST_DATABASE_MODULE = '../dist/config/database.js';");
+            expect(seed.content).toContain('async function loadPrisma(): Promise<SeedPrismaClient> {');
+            expect(seed.content).not.toContain('new PrismaClient()');
             expect(seed.content).not.toContain('Record<string, string[]>');
         });
 
-        it('orders seed creation using relation metadata when FK naming is non-conventional', async () => {
+        it('maps custom FK names from relation metadata instead of guessing relationNameId', async () => {
             const raw = `
 datasource db {
   provider = "postgresql"
@@ -1893,14 +2127,15 @@ model Parent {
             const files = await generateProject(schema, { ...defaultOptions, only: 'prisma' }, raw);
             const seed = files.find(f => f.path === 'prisma/seed.ts')!;
 
-            const childCreateIndex = seed.content.indexOf('await prisma.child.create(');
-            const parentCreateIndex = seed.content.indexOf('await prisma.parent.create(');
-            expect(parentCreateIndex).toBeGreaterThan(-1);
-            expect(childCreateIndex).toBeGreaterThan(-1);
-            expect(parentCreateIndex).toBeLessThan(childCreateIndex);
+            expect(seed.content).toContain('"relationName": "parent"');
+            expect(seed.content).toContain('"targetModel": "Parent"');
+            expect(seed.content).toContain('"cacheKey": "Parent|id"');
+            expect(seed.content).toMatch(/"localFields": \[\s*"parentFk"\s*\]/);
+            expect(seed.content).toMatch(/"referenceFields": \[\s*"id"\s*\]/);
+            expect(seed.content).toContain('relation.localFields.forEach((localField, index) => {');
         });
 
-        it('orders seed creation for composite custom FK relations', async () => {
+        it('maps composite custom FK relations using referenced parent fields', async () => {
             const raw = `
 datasource db {
   provider = "postgresql"
@@ -1930,11 +2165,10 @@ model Book {
             const files = await generateProject(schema, { ...defaultOptions, only: 'prisma' }, raw);
             const seed = files.find(f => f.path === 'prisma/seed.ts')!;
 
-            const localeCreateIndex = seed.content.indexOf('await prisma.locale.create(');
-            const bookCreateIndex = seed.content.indexOf('await prisma.book.create(');
-            expect(localeCreateIndex).toBeGreaterThan(-1);
-            expect(bookCreateIndex).toBeGreaterThan(-1);
-            expect(localeCreateIndex).toBeLessThan(bookCreateIndex);
+            expect(seed.content).toContain('"cacheKey": "Locale|code,region"');
+            expect(seed.content).toMatch(/"localFields": \[\s*"localeCode",\s*"localeRegion"\s*\]/);
+            expect(seed.content).toMatch(/"referenceFields": \[\s*"code",\s*"region"\s*\]/);
+            expect(seed.content).toContain("const select = Object.fromEntries(relation.referenceFields.map((field) => [field, true]));");
         });
 
         it('emits wildcard-safe CORS credentials behavior and sqlite data path aligned with schema-relative resolution', async () => {
@@ -1964,6 +2198,122 @@ model Item {
             expect(corsFile.content).toContain('credentials,');
             expect(envExample.content).toContain('Use an explicit origin when sending credentials from browsers');
             expect(dc.content).toContain('DATABASE_URL=file:./data/');
+        });
+
+        it('emits usable auth-model seed credentials and password hashing', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id String @id @default(cuid())
+  /// @bcm.identifier
+  email String @unique
+  /// @bcm.password
+  password String
+  role String @default("ADMIN")
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'prisma' }, raw);
+            const seed = files.find(f => f.path === 'prisma/seed.ts')!;
+
+            expect(seed.content).toContain("import bcrypt from 'bcryptjs';");
+            expect(seed.content).toContain("const AUTH_SEED_PASSWORD = 'SeedPassword123!';");
+            expect(seed.content).toContain('return bcrypt.hash(AUTH_SEED_PASSWORD, 12);');
+            expect(seed.content).toContain('"sampleIdentifier": "seed-user-1@example.com"');
+            expect(seed.content).toContain('Sample ${model.name} credentials -> ${model.auth.identifierField}: ${model.auth.sampleIdentifier}, password: ${AUTH_SEED_PASSWORD}');
+            expect(seed.content).toContain('"isAuthIdentifier": true');
+            expect(seed.content).toContain('"isAuthPassword": true');
+        });
+
+        it('retries generated unique selectors before failing with a selector-specific error', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Product {
+  id   String @id @default(cuid())
+  sku  String @unique
+  slug String @unique
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'prisma' }, raw);
+            const seed = files.find(f => f.path === 'prisma/seed.ts')!;
+
+            expect(seed.content).toContain('const MAX_UNIQUE_RETRIES = 25;');
+            expect(seed.content).toContain('function reserveUniqueCandidate(');
+            expect(seed.content).toContain('Unable to generate unique seed data for ${model.name} after ${MAX_UNIQUE_RETRIES} attempts.');
+            expect(seed.content).toMatch(/"uniqueSelectors": \[\s*\{\s*"fields": \[\s*"sku"\s*\]\s*\},\s*\{\s*"fields": \[\s*"slug"\s*\]\s*\}\s*\]/);
+        });
+
+        it('omits optional self relations from seed data while preserving relation metadata', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Category {
+  id       String    @id @default(cuid())
+  name     String
+  parentId String?
+  parent   Category? @relation(fields: [parentId], references: [id])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'prisma' }, raw);
+            const seed = files.find(f => f.path === 'prisma/seed.ts')!;
+
+            expect(seed.content).toContain('"relationName": "parent"');
+            expect(seed.content).toContain('"omit": true');
+            expect(seed.content).not.toContain('"name": "parentId"');
+        });
+
+        it('fails before cleanup for required cyclic or self relations', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Category {
+  id       String   @id @default(cuid())
+  parentId String
+  parent   Category @relation(fields: [parentId], references: [id])
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'prisma' }, raw);
+            const seed = files.find(f => f.path === 'prisma/seed.ts')!;
+
+            expect(seed.content).toContain('Seeder cannot safely generate required cyclic/self relations');
+            expect(seed.content).toContain('relation \\"parent\\" cannot be auto-seeded');
+            expect(seed.content.indexOf('assertSupportedRelations();')).toBeLessThan(
+                seed.content.indexOf('await getDelegate(model.clientKey).deleteMany();')
+            );
         });
     });
 
@@ -2039,7 +2389,7 @@ model Task {
             expect(teamRoutes).toBeDefined();
             expect(teamRoutes!.content).toContain('authorize');
             expect(openapi).toBeDefined();
-            expect(JSON.parse(openapi!.content).paths['/api/auth/login']).toBeDefined();
+            expect(JSON.parse(openapi!.content).paths['/api/v1/auth/login']).toBeDefined();
         });
 
         it('uses explicit @@id name/map selector key in service and selector-aware OpenAPI path', async () => {
@@ -2048,14 +2398,14 @@ model Task {
             const routeFiles = await generateProject(schema, { ...defaultOptions, only: 'routes' }, raw);
             const swaggerFiles = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, raw);
 
-            const service = routeFiles.find((f) => f.path === 'src/modules/enrollment/enrollment.service.ts');
-            expect(service).toBeDefined();
-            expect(service!.content).toContain('enrollmentKey');
-            expect(service!.content).toContain('schoolId: key.schoolId');
-            expect(service!.content).toContain('studentId: key.studentId');
+            const repo = routeFiles.find((f) => f.path === 'src/modules/enrollment/enrollment.repository.ts');
+            expect(repo).toBeDefined();
+            expect(repo!.content).toContain('enrollmentKey');
+            expect(repo!.content).toContain('schoolId: key.schoolId');
+            expect(repo!.content).toContain('studentId: key.studentId');
 
             const openapi = JSON.parse(swaggerFiles[0].content);
-            expect(openapi.paths['/api/enrollments/{schoolId}/{studentId}']).toBeDefined();
+            expect(openapi.paths['/api/v1/enrollments/{schoolId}/{studentId}']).toBeDefined();
         });
     });
 
@@ -2068,6 +2418,239 @@ model Task {
             const files = await generateProject(parsed, { ...defaultOptions, only: 'routes' }, raw);
             expect(files.length).toBeGreaterThan(0);
             expect(files.some((file) => file.path.endsWith('auditEntry.controller.ts'))).toBe(true);
+        });
+    });
+
+    describe('fastify framework hardening', () => {
+        const FASTIFY_AUTH_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id String @id @default(cuid())
+  /// @bcm.identifier
+  email String @unique
+  /// @bcm.password
+  password String
+  role String
+}
+
+/// @bcm.auth(roles: [ADMIN])
+model Secret {
+  id String @id @default(cuid())
+  key String
+}
+`;
+
+        const FASTIFY_AUTH_NO_ROLE_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id String @id @default(cuid())
+  /// @bcm.identifier
+  email String @unique
+  /// @bcm.password
+  password String
+  posts Post[]
+}
+
+/// @bcm.protected
+model Post {
+  id String @id @default(cuid())
+  title String
+  authorId String
+  author User @relation(fields: [authorId], references: [id])
+}
+`;
+
+        const FASTIFY_UPLOAD_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Asset {
+  id String @id @default(cuid())
+  /// @bcm.upload(dest: "assets")
+  imageUrl String?
+}
+`;
+
+        it('registers JWT and multipart plugins for fastify output when needed', async () => {
+            const authSchema = parsePrismaAst(FASTIFY_AUTH_SCHEMA);
+            const authFiles = await generateProject(authSchema, { ...defaultOptions, framework: 'fastify' }, FASTIFY_AUTH_SCHEMA);
+            const authApp = authFiles.find((f) => f.path === 'src/app.ts')!;
+            const authPkg = authFiles.find((f) => f.path === 'package.json')!;
+            const authRoutes = authFiles.find((f) => f.path === 'src/modules/auth/auth.routes.ts')!;
+            const authMiddleware = authFiles.find((f) => f.path === 'src/middlewares/auth.middleware.ts')!;
+            const secretController = authFiles.find((f) => f.path.endsWith('secret.controller.ts'))!;
+
+            expect(authApp.content).toContain("import jwt from '@fastify/jwt'");
+            expect(authApp.content).toContain('await app.register(jwt, { secret: env.JWT_SECRET })');
+            expect(authPkg.content).toContain('"@fastify/jwt"');
+            expect(authRoutes.content).toContain('fastify.jwt.sign');
+            expect(authMiddleware.content).toContain('payload: { sub: string; role?: string; [key: string]: unknown }');
+            expect(authMiddleware.content).toContain('user: { sub: string; role?: string; [key: string]: unknown }');
+            expect(secretController.content).toContain("from 'fastify'");
+            expect(secretController.content).not.toContain("from 'express'");
+
+            const uploadSchema = parsePrismaAst(FASTIFY_UPLOAD_SCHEMA);
+            const uploadFiles = await generateProject(uploadSchema, { ...defaultOptions, framework: 'fastify' }, FASTIFY_UPLOAD_SCHEMA);
+            const uploadApp = uploadFiles.find((f) => f.path === 'src/app.ts')!;
+            const uploadRoutes = uploadFiles.find((f) => f.path.endsWith('asset.routes.ts'))!;
+            const uploadConfig = uploadFiles.find((f) => f.path === 'src/config/upload.ts')!;
+
+            expect(uploadApp.content).toContain("import multipart from '@fastify/multipart'");
+            expect(uploadApp.content).toContain('await app.register(multipart');
+            expect(uploadRoutes.content).toContain('uploadField(');
+            expect(uploadConfig.content).toContain("from '@fastify/multipart'");
+        });
+
+        it('supports fastify auth models without role fields', async () => {
+            const schema = parsePrismaAst(FASTIFY_AUTH_NO_ROLE_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, framework: 'fastify' }, FASTIFY_AUTH_NO_ROLE_SCHEMA);
+            const authRoutes = files.find((f) => f.path === 'src/modules/auth/auth.routes.ts')!;
+            const authMiddleware = files.find((f) => f.path === 'src/middlewares/auth.middleware.ts')!;
+
+            expect(authMiddleware.content).toContain('payload: { sub: string; role?: string; [key: string]: unknown }');
+            expect(authMiddleware.content).toContain('user: { sub: string; role?: string; [key: string]: unknown }');
+            expect(authRoutes.content).toContain('sub: String(user.id)');
+            expect(authRoutes.content).not.toContain('role: user.role');
+        });
+
+        it('uses fastify-native response helpers without express imports', async () => {
+            const schema = parsePrismaAst(FASTIFY_AUTH_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'utils', framework: 'fastify' }, FASTIFY_AUTH_SCHEMA);
+            const responseFile = files.find((f) => f.path === 'src/utils/response.ts')!;
+
+            expect(responseFile.content).toContain("import type { FastifyReply } from 'fastify'");
+            expect(responseFile.content).toContain('reply.code(200).send');
+            expect(responseFile.content).not.toContain("from 'express'");
+        });
+
+        it('builds a generated fastify project when auth model has no role field', async () => {
+            const workspace = await createTempWorkspace('backgen-fastify-auth-no-role-');
+            const schema = parsePrismaAst(FASTIFY_AUTH_NO_ROLE_SCHEMA);
+            const files = await generateProject(
+                schema,
+                {
+                    schema: workspace.resolve('schema.prisma'),
+                    output: workspace.root,
+                    dryRun: false,
+                    force: true,
+                    framework: 'fastify',
+                },
+                FASTIFY_AUTH_NO_ROLE_SCHEMA
+            );
+
+            try {
+                await writeFiles(files, workspace.root, { mode: 'overwrite-targeted' });
+                await fs.writeFile(workspace.resolve('.env'), [
+                    'NODE_ENV=development',
+                    'PORT=3000',
+                    'DATABASE_URL="postgresql://postgres:postgres@localhost:5432/backgen_test"',
+                    'JWT_SECRET="change-me-to-a-long-random-string-at-least-32-chars"',
+                    'CORS_ORIGIN="*"',
+                    'LOG_LEVEL="info"',
+                    'RATE_LIMIT_MAX=100',
+                ].join('\n'), 'utf8');
+
+                await execFileAsync('pnpm', ['install'], {
+                    cwd: workspace.root,
+                    timeout: 240000,
+                    maxBuffer: 1024 * 1024 * 20,
+                });
+                await execFileAsync('npx', ['prisma', 'generate'], {
+                    cwd: workspace.root,
+                    timeout: 240000,
+                    maxBuffer: 1024 * 1024 * 20,
+                });
+                await execFileAsync('npm', ['run', 'build'], {
+                    cwd: workspace.root,
+                    timeout: 240000,
+                    maxBuffer: 1024 * 1024 * 20,
+                });
+            } finally {
+                await workspace.cleanup();
+            }
+        }, 300000);
+    });
+
+    describe('cache invalidation strategy', () => {
+        const CACHE_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.cache(ttl: 120)
+model Product {
+  id String @id @default(cuid())
+  name String
+}
+`;
+
+        it('uses versioned cache keys and bumps version on mutations', async () => {
+            const schema = parsePrismaAst(CACHE_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, CACHE_SCHEMA);
+            const service = files.find((f) => f.path.endsWith('product.service.ts'))!;
+            const testFile = files.find((f) => f.path.endsWith('product.test.ts'))!;
+
+            expect(service.content).toContain('CACHE_VERSION_KEY');
+            expect(service.content).toContain('getCacheVersion()');
+            expect(service.content).toContain('bumpCacheVersion()');
+            expect(service.content).toContain('await redis.incr(CACHE_VERSION_KEY)');
+            expect(service.content).not.toContain('redis.del(`${CACHE_PREFIX}:list:*`)');
+            expect(testFile.content).toContain('incr: vi.fn().mockResolvedValue');
+        });
+    });
+
+    describe('datasource adapter safety', () => {
+        it('does not inject adapter for providers without adapter templates', async () => {
+            const raw = `
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Item {
+  id String @id @default(cuid())
+}
+`;
+            const schema = parsePrismaAst(raw);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'config' }, raw);
+            const db = files.find((f) => f.path === 'src/config/database.ts')!;
+
+            expect(db.content).toContain('new PrismaClient');
+            expect(db.content).not.toContain('adapter,');
+            expect(db.content).not.toContain('const adapter =');
         });
     });
 

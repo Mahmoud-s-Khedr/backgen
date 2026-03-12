@@ -70,6 +70,18 @@ model User {
         expect(user.warnings.some(w => w.includes('field directive') && w.includes('outside'))).toBe(true);
     });
 
+    it('keeps warning for trailing out-of-model field directive at EOF', () => {
+        const schema = `
+model User {
+  id String @id
+}
+/// @bcm.hidden
+`;
+        const result = parseDirectives(schema);
+        const user = result.get('User')!;
+        expect(user.warnings.some(w => w.includes('@bcm.hidden') && w.includes('outside'))).toBe(true);
+    });
+
     it('warns about unknown directives', () => {
         const schema = `
 model User {

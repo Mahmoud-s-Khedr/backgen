@@ -4,16 +4,24 @@ import { basename, resolve } from 'path';
 
 /**
  * Generate infrastructure files: Dockerfile, docker-compose, CI, .env.example,
- * .gitignore, README, package.json, tsconfig.json.
+ * .dockerignore, .gitignore, README, package.json, tsconfig.json.
  */
 export function generateInfraFiles(schema: ParsedSchema, options?: GenerateOptions): GeneratedFile[] {
     const resolvedPath = resolve(options?.output || '.');
     const projectName = basename(resolvedPath) || 'api-server';
+    const hasCache = schema.models.some((m) => m.cacheConfig != null);
+    const hasUploads = schema.models.some((m) => m.fields.some((f) => f.directives.includes('upload')));
+    const hasAuth = schema.models.some((m) => m.isAuthModel);
+    const framework = options?.framework ?? 'express';
     const data = {
         models: schema.models,
         schema,
         projectName,
         provider: schema.datasource.provider,
+        hasCache,
+        hasUploads,
+        hasAuth,
+        framework,
     };
 
     return [
@@ -22,12 +30,20 @@ export function generateInfraFiles(schema: ParsedSchema, options?: GenerateOptio
             content: renderTemplate('package.json.ejs', data),
         },
         {
+            path: 'prisma.config.ts',
+            content: renderTemplate('config/prisma.config.ts.ejs', data),
+        },
+        {
             path: 'tsconfig.json',
             content: renderTemplate('tsconfig.json.ejs', data),
         },
         {
             path: 'Dockerfile',
             content: renderTemplate('infra/Dockerfile.ejs', data),
+        },
+        {
+            path: 'docker-entrypoint.sh',
+            content: renderTemplate('infra/docker-entrypoint.sh.ejs', data),
         },
         {
             path: 'docker-compose.yml',
@@ -40,6 +56,10 @@ export function generateInfraFiles(schema: ParsedSchema, options?: GenerateOptio
         {
             path: '.env.example',
             content: renderTemplate('infra/env.example.ejs', data),
+        },
+        {
+            path: '.dockerignore',
+            content: renderTemplate('infra/dockerignore.ejs', data),
         },
         {
             path: '.gitignore',

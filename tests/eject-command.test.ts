@@ -5,7 +5,7 @@ import { ejectCommand } from '../src/commands/eject.js';
 import { createTempWorkspace, writeWorkspaceFile } from './helpers/test-fs.js';
 import { captureConsole, mockProcessExitToThrow } from './helpers/test-io.js';
 
-const BOOTSTRAP_COMMENT = '// Bootstrapped with Backend Creator (bcm) — https://github.com/backend-creator';
+const BOOTSTRAP_COMMENT = '// Bootstrapped with Backend Creator (bcm) — https://github.com/Mahmoud-s-Khedr/backgen';
 
 async function runEject(workspaceRoot: string, targetRelativePath: string): Promise<void> {
     const originalCwd = process.cwd();

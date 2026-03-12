@@ -193,6 +193,29 @@ model User {
             const authorField = result.models[0].fields.find(f => f.name === 'author')!;
             expect(authorField.isRelation).toBe(true);
             expect(authorField.relationModel).toBe('User');
+            expect(authorField.relationField).toBe('authorId');
+            expect(authorField.relationReferences).toBe('id');
+        });
+
+        it('captures composite relation references', () => {
+            const result = parsePrismaAst(schema(`
+model Locale {
+  code   String
+  region String
+  books  Book[]
+
+  @@id([code, region])
+}
+
+model Book {
+  id           String @id
+  localeCode   String
+  localeRegion String
+  locale       Locale @relation(fields: [localeCode, localeRegion], references: [code, region])
+}`));
+            const localeField = result.models[1].fields.find(f => f.name === 'locale')!;
+            expect(localeField.relationField).toBe('localeCode, localeRegion');
+            expect(localeField.relationReferences).toBe('code, region');
         });
 
         it('detects implicit relations (list fields of non-scalar type)', () => {
@@ -221,6 +244,36 @@ model User {
 }`));
             const authorIdField = result.models[0].fields.find(f => f.name === 'authorId')!;
             expect(authorIdField.isRelation).toBe(false);
+        });
+
+        it('keeps scalar list fields as non-relations', () => {
+            const result = parsePrismaAst(schema(`
+model Post {
+  id   String   @id
+  tags String[]
+}`));
+            const tagsField = result.models[0].fields.find(f => f.name === 'tags')!;
+            expect(tagsField.isList).toBe(true);
+            expect(tagsField.isRelation).toBe(false);
+            expect(tagsField.relationModel).toBeUndefined();
+        });
+
+        it('keeps enum list fields as non-relations', () => {
+            const result = parsePrismaAst(schema(`
+enum TagKind {
+  FEATURED
+  ARCHIVED
+}
+
+model Post {
+  id   String    @id
+  tags TagKind[]
+}`));
+            const tagsField = result.models[0].fields.find(f => f.name === 'tags')!;
+            expect(tagsField.isList).toBe(true);
+            expect(tagsField.isEnum).toBe(true);
+            expect(tagsField.isRelation).toBe(false);
+            expect(tagsField.relationModel).toBeUndefined();
         });
     });
 

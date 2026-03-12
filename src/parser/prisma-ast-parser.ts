@@ -7,9 +7,8 @@ import type {
     EnumDefinition,
     DatasourceConfig,
 } from './types.js';
-import { parseDirectives, getFieldDirectives } from './directive-parser.js';
+import { parseDirectives, getFieldDirectives, getFieldUploadConfig } from './directive-parser.js';
 import type { ModelDirectivesResult } from './directive-parser.js';
-import { PRISMA_SCALAR_TYPES } from '../generator/template-engine.js';
 
 /** Attribute node from @mrleebo/prisma-ast (e.g., @id, @unique, @default, @relation) */
 interface AstAttribute {
@@ -77,17 +76,20 @@ export function parsePrismaAst(schemaContent: string): ParsedSchema {
     const enums: EnumDefinition[] = [];
     let datasource: DatasourceConfig = { provider: 'postgresql', url: 'env("DATABASE_URL")' };
 
-    // First pass: collect enum names for distinguishing enums from relations
+    // First pass: collect declared model/enum names for implicit relation detection
+    const modelNames = new Set<string>();
     const enumNames = new Set<string>();
     for (const block of ast.list as AstBlock[]) {
-        if (block.type === 'enum') {
+        if (block.type === 'model') {
+            modelNames.add(block.name);
+        } else if (block.type === 'enum') {
             enumNames.add(block.name);
         }
     }
 
     for (const block of ast.list as AstBlock[]) {
         if (block.type === 'model') {
-            models.push(parseModelBlock(block, directivesMap, enumNames));
+            models.push(parseModelBlock(block, directivesMap, modelNames, enumNames));
         } else if (block.type === 'enum') {
             enums.push(parseEnumBlock(block));
         } else if (block.type === 'datasource') {
@@ -131,6 +133,7 @@ function findHiddenRequiredFieldWarnings(models: ModelDefinition[]): string[] {
 function parseModelBlock(
     block: AstBlock,
     directivesMap: Map<string, ModelDirectivesResult>,
+    modelNames: Set<string>,
     enumNames: Set<string>
 ): ModelDefinition {
     const modelName: string = block.name;
@@ -169,6 +172,7 @@ function parseModelBlock(
         const isRelation = !!relationAttr;
         let relationModel: string | undefined;
         let relationField: string | undefined;
+        let relationReferences: string | undefined;
 
         if (isRelation && relationAttr) {
             const relArgs: AstArg[] = relationAttr.args || [];
@@ -187,6 +191,11 @@ function parseModelBlock(
                     }
                 }
                 if (argKey === 'references') {
+                    if (keyValue?.type === 'keyValue' && keyValue.value) {
+                        relationReferences = extractArrayArgFromValue(keyValue.value);
+                    } else {
+                        relationReferences = extractArrayArg(arg);
+                    }
                     // The referenced model is the field type
                     relationModel = fieldType;
                 }
@@ -199,15 +208,18 @@ function parseModelBlock(
         // Check if this field references an enum type
         const isEnum = enumNames.has(fieldType);
 
-        // Also detect implicit relations (field type matches a model name, is a list, no @relation)
-        // Enum types are NOT relations — they are scalar-like values
-        const isImplicitRelation = !isRelation && !isEnum && (isList || isNonScalarType(fieldType));
+        // Implicit relations are undeclared fields whose type still matches a model.
+        const isImplicitRelation = !isRelation && !isEnum && modelNames.has(fieldType);
 
         // Get directives; @bcm.password implies writeOnly (excluded from responses)
         const rawDirectives = getFieldDirectives(directivesMap, modelName, fieldName);
         const directives = rawDirectives.includes('password') && !rawDirectives.includes('writeOnly')
             ? [...rawDirectives, 'writeOnly' as const]
             : rawDirectives;
+
+        const uploadConfig = directives.includes('upload')
+            ? getFieldUploadConfig(directivesMap, modelName, fieldName)
+            : undefined;
 
         fields.push({
             name: fieldName,
@@ -220,10 +232,12 @@ function parseModelBlock(
             isEnum,
             relationModel: isRelation || isImplicitRelation ? fieldType : undefined,
             relationField,
+            relationReferences,
             hasDefault,
             isServerDefault,
             defaultValue,
             directives,
+            ...(uploadConfig ? { uploadConfig } : {}),
         });
     }
 
@@ -255,6 +269,7 @@ function parseModelBlock(
         identifierField,
         passwordField,
         roleField,
+        ...(modelResult?.cacheConfig ? { cacheConfig: modelResult.cacheConfig } : {}),
     };
 }
 
@@ -327,13 +342,6 @@ function parseDatasourceBlock(block: AstBlock): DatasourceConfig {
     }
 
     return { provider, url };
-}
-
-/**
- * Check if a type is non-scalar (i.e., references another model or enum).
- */
-function isNonScalarType(type: string): boolean {
-    return !PRISMA_SCALAR_TYPES.has(type);
 }
 
 function extractDefaultValue(attr: AstAttribute): string | undefined {

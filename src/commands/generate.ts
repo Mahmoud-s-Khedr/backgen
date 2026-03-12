@@ -44,6 +44,16 @@ interface GenerateCommandOptions extends GenerateOptions {
     json?: boolean;
 }
 
+function normalizeFramework(value: string | undefined): 'express' | 'fastify' {
+    if (!value) {
+        return 'express';
+    }
+    if (value === 'express' || value === 'fastify') {
+        return value;
+    }
+    throw new Error(`Invalid framework "${value}". Expected one of: express, fastify.`);
+}
+
 /**
  * Count generated CRUD endpoints using selector-aware rules:
  * - 6 endpoints for models with an item selector (list/get/create/update/patch/delete)
@@ -103,6 +113,17 @@ function failWithJson(stage: GenerateErrorStage, message: string): never {
  */
 export async function generateCommand(options: GenerateCommandOptions): Promise<void> {
     const jsonMode = Boolean(options.json);
+    let framework: 'express' | 'fastify';
+    try {
+        framework = normalizeFramework(options.framework);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (jsonMode) {
+            failWithJson('generate', message);
+        }
+        console.error(chalk.red(`✖ ${message}`));
+        process.exit(1);
+    }
     const schemaPath = resolve(process.cwd(), options.schema);
     const outputDir = resolve(process.cwd(), options.output);
 
@@ -173,7 +194,7 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
     const genSpinner = !jsonMode ? ora('Generating backend code...').start() : null;
     let generatedFiles: GeneratedFile[];
     try {
-        generatedFiles = await generateProject(parsedSchema, options, schemaContent);
+        generatedFiles = await generateProject(parsedSchema, { ...options, framework }, schemaContent);
         genSpinner?.succeed(chalk.green(`Generated ${generatedFiles.length} file(s)`));
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

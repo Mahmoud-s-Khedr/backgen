@@ -4,7 +4,7 @@ import ora from 'ora';
 import fs from 'fs-extra';
 
 const BCM_DIRECTIVE_REGEX = /^\s*\/\/\/\s*@bcm\.\w+.*$/gm;
-const BOOTSTRAP_COMMENT = '// Bootstrapped with Backend Creator (bcm) — https://github.com/backend-creator';
+const BOOTSTRAP_COMMENT = '// Bootstrapped with Backend Creator (bcm) — https://github.com/Mahmoud-s-Khedr/backgen';
 
 /**
  * `bcm eject <path>`

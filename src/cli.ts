@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { initCommand } from './commands/init.js';
 import { generateCommand } from './commands/generate.js';
 import { ejectCommand } from './commands/eject.js';
+import { validateCommand } from './commands/validate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -18,10 +19,19 @@ const pkg = JSON.parse(
 
 const program = new Command();
 
+function parseFramework(value: string): 'express' | 'fastify' {
+    if (value === 'express' || value === 'fastify') {
+        return value;
+    }
+    throw new InvalidArgumentError(
+        `Invalid framework "${value}". Expected one of: express, fastify.`
+    );
+}
+
 program
     .name('bcm')
     .description(
-        'Generate a complete, production-ready Express.js REST API backend from a Prisma schema file'
+        'Generate a complete, production-ready REST API backend (Express or Fastify) from a Prisma schema file'
     )
     .version(pkg.version);
 
@@ -46,6 +56,12 @@ program
     )
     .option('--json', 'Output machine-readable JSON only', false)
     .option('--force', 'Overwrite existing output directory', false)
+    .option(
+        '--framework <name>',
+        'Target framework: express (default) or fastify',
+        parseFramework,
+        'express'
+    )
     .action(generateCommand);
 
 program
@@ -53,5 +69,12 @@ program
     .description('Strip @bcm directives from generated code')
     .argument('<path>', 'Path to the generated project directory')
     .action(ejectCommand);
+
+program
+    .command('validate')
+    .description('Check schema for directive issues without generating any files')
+    .requiredOption('-s, --schema <path>', 'Path to the Prisma schema file (.prisma)')
+    .option('--json', 'Output machine-readable JSON only', false)
+    .action(validateCommand);
 
 program.parse();

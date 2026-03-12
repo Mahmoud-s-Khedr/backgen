@@ -1,4 +1,4 @@
-import type { FieldDirective, ModelDirective } from './types.js';
+import type { FieldDirective, ModelDirective, CacheConfig, UploadConfig } from './types.js';
 
 /** Result of parsing directives for a single field */
 export interface DirectiveResult {
@@ -12,7 +12,9 @@ export interface ModelDirectivesResult {
     modelName: string;
     modelDirectives: ModelDirective[];
     authRoles?: string[];
+    cacheConfig?: CacheConfig;
     fields: Map<string, FieldDirective[]>;
+    uploadConfigs: Map<string, UploadConfig>;
     warnings: string[];
 }
 
@@ -26,6 +28,7 @@ const VALID_FIELD_DIRECTIVES: Set<string> = new Set([
     'nested',
     'identifier',
     'password',
+    'upload',
 ]);
 
 const VALID_MODEL_DIRECTIVES: Set<string> = new Set([
@@ -33,6 +36,7 @@ const VALID_MODEL_DIRECTIVES: Set<string> = new Set([
     'softDelete',
     'auth',
     'authModel',
+    'cache',
 ]);
 
 /**
@@ -42,6 +46,31 @@ function parseAuthRoles(rawArgs: string): string[] {
     const match = rawArgs.match(/roles:\s*\[([^\]]*)\]/);
     if (!match) return [];
     return match[1].split(',').map(r => r.trim()).filter(Boolean);
+}
+
+/**
+ * Parse @bcm.cache(ttl: 300) arguments.
+ */
+function parseCacheArgs(rawArgs: string): CacheConfig {
+    const ttlMatch = rawArgs.match(/ttl:\s*(\d+)/);
+    return { ttl: ttlMatch ? parseInt(ttlMatch[1], 10) : 300 };
+}
+
+/**
+ * Parse @bcm.upload(dest:"avatars", maxSize:5242880, mimeTypes:["image/jpeg"]) arguments.
+ */
+function parseUploadArgs(rawArgs: string): UploadConfig {
+    const destMatch = rawArgs.match(/dest:\s*["']([^"']+)["']/);
+    const maxSizeMatch = rawArgs.match(/maxSize:\s*(\d+)/);
+    const mimeTypesMatch = rawArgs.match(/mimeTypes:\s*\[([^\]]*)\]/);
+
+    const dest = destMatch ? destMatch[1] : 'uploads';
+    const maxSize = maxSizeMatch ? parseInt(maxSizeMatch[1], 10) : undefined;
+    const mimeTypes = mimeTypesMatch
+        ? mimeTypesMatch[1].split(',').map(m => m.trim().replace(/["']/g, '')).filter(Boolean)
+        : undefined;
+
+    return { dest, ...(maxSize !== undefined ? { maxSize } : {}), ...(mimeTypes ? { mimeTypes } : {}) };
 }
 
 const CONFLICTING_PAIRS: [FieldDirective, FieldDirective][] = [
@@ -75,6 +104,8 @@ export function parseDirectives(
     let pendingFieldDirectives: FieldDirective[] = [];
     let pendingModelDirectives: ModelDirective[] = [];
     let pendingAuthRoles: string[] = [];
+    let pendingCacheConfig: CacheConfig | undefined;
+    let pendingUploadConfig: UploadConfig | undefined;
     let pendingWarnings: string[] = []; // Warnings collected outside model blocks.
 
     for (let i = 0; i < lines.length; i++) {
@@ -89,17 +120,22 @@ export function parseDirectives(
                 modelName: currentModel,
                 modelDirectives: [],
                 fields: new Map(),
+                uploadConfigs: new Map(),
                 warnings: [],
             };
             result.modelDirectives.push(...pendingModelDirectives);
             if (pendingAuthRoles.length > 0) {
                 result.authRoles = [...pendingAuthRoles];
             }
+            if (pendingCacheConfig) {
+                result.cacheConfig = pendingCacheConfig;
+            }
             result.warnings.push(...pendingWarnings);
             results.set(currentModel, result);
             pendingFieldDirectives = [];
             pendingModelDirectives = [];
             pendingAuthRoles = [];
+            pendingCacheConfig = undefined;
             pendingWarnings = [];
             continue;
         }
@@ -136,6 +172,9 @@ export function parseDirectives(
                     if (directiveName === 'auth' && directiveArgs) {
                         pendingAuthRoles = parseAuthRoles(directiveArgs);
                     }
+                    if (directiveName === 'cache') {
+                        pendingCacheConfig = parseCacheArgs(directiveArgs ?? '');
+                    }
                 }
                 continue;
             }
@@ -149,6 +188,9 @@ export function parseDirectives(
                     continue;
                 }
                 pendingFieldDirectives.push(directiveName as FieldDirective);
+                if (directiveName === 'upload' && directiveArgs) {
+                    pendingUploadConfig = parseUploadArgs(directiveArgs);
+                }
                 continue;
             }
 
@@ -184,8 +226,12 @@ export function parseDirectives(
                 }
 
                 result.fields.set(fieldName, [...pendingFieldDirectives]);
+                if (pendingUploadConfig) {
+                    result.uploadConfigs.set(fieldName, pendingUploadConfig);
+                }
             }
             pendingFieldDirectives = [];
+            pendingUploadConfig = undefined;
         }
     }
 
@@ -194,6 +240,11 @@ export function parseDirectives(
         result?.warnings.push(
             `Line ${lines.length}: Found @bcm directives without a following field declaration`
         );
+    }
+
+    if (!currentModel && pendingWarnings.length > 0 && results.size > 0) {
+        const lastModel = Array.from(results.values()).at(-1);
+        lastModel?.warnings.push(...pendingWarnings);
     }
 
     return results;
@@ -210,4 +261,15 @@ export function getFieldDirectives(
     const model = directivesMap.get(modelName);
     if (!model) return [];
     return model.fields.get(fieldName) || [];
+}
+
+/**
+ * Get upload config for a specific field in a model, if any.
+ */
+export function getFieldUploadConfig(
+    directivesMap: Map<string, ModelDirectivesResult>,
+    modelName: string,
+    fieldName: string
+): UploadConfig | undefined {
+    return directivesMap.get(modelName)?.uploadConfigs.get(fieldName);
 }

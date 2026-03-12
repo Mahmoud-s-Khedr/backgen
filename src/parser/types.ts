@@ -3,10 +3,10 @@
 // ============================================================
 
 /** Prisma field directives extracted from /// @bcm.* comments */
-export type FieldDirective = 'hidden' | 'readonly' | 'writeOnly' | 'searchable' | 'nested' | 'identifier' | 'password';
+export type FieldDirective = 'hidden' | 'readonly' | 'writeOnly' | 'searchable' | 'nested' | 'identifier' | 'password' | 'upload';
 
 /** Directives that apply at the model level */
-export type ModelDirective = 'protected' | 'softDelete' | 'auth' | 'authModel';
+export type ModelDirective = 'protected' | 'softDelete' | 'auth' | 'authModel' | 'cache';
 
 /** Complete parsed schema representation */
 export interface ParsedSchema {
@@ -14,6 +14,18 @@ export interface ParsedSchema {
     enums: EnumDefinition[];
     datasource: DatasourceConfig;
     warnings: string[];
+}
+
+/** Cache configuration from @bcm.cache(ttl: <seconds>) */
+export interface CacheConfig {
+    ttl: number;
+}
+
+/** Upload configuration from @bcm.upload(dest, maxSize, mimeTypes) */
+export interface UploadConfig {
+    dest: string;
+    maxSize?: number;
+    mimeTypes?: string[];
 }
 
 /** A single Prisma model with all its metadata */
@@ -32,6 +44,8 @@ export interface ModelDefinition {
     passwordField?: string;
     /** Scalar field name used for JWT role claim (required for @bcm.auth RBAC models) */
     roleField?: string;
+    /** Cache configuration from @bcm.cache directive */
+    cacheConfig?: CacheConfig;
 }
 
 /** A model selector that can uniquely identify a single record */
@@ -74,6 +88,8 @@ export interface FieldDefinition {
     relationModel?: string;
     /** If a relation, the local FK field name */
     relationField?: string;
+    /** If a relation, the referenced field name(s) on the target model */
+    relationReferences?: string;
     /** Whether this field has a @default() value */
     hasDefault: boolean;
     /** True if the default is server-generated (uuid(), now(), autoincrement(), @updatedAt). False for user-overridable literals (false, 0, "USER"). */
@@ -82,6 +98,8 @@ export interface FieldDefinition {
     defaultValue?: string;
     /** @bcm.* directives applied to this field */
     directives: FieldDirective[];
+    /** Upload configuration from @bcm.upload directive */
+    uploadConfig?: UploadConfig;
 }
 
 /** A Prisma enum definition */
@@ -104,6 +122,8 @@ export interface GenerateOptions {
     only?: string;
     force: boolean;
     json?: boolean;
+    /** Target framework: 'express' (default) or 'fastify' */
+    framework?: 'express' | 'fastify';
 }
 
 /** A single file to be written by the generator */

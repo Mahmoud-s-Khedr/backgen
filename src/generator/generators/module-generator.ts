@@ -65,7 +65,7 @@ function getSelectorFieldMeta(
 /**
  * Generate module files for each model: controller, service, routes, dto, test.
  */
-export function generateModuleFiles(schema: ParsedSchema): GeneratedFile[] {
+export function generateModuleFiles(schema: ParsedSchema, framework: 'express' | 'fastify' = 'express'): GeneratedFile[] {
     const files: GeneratedFile[] = [];
 
     for (const model of schema.models) {
@@ -161,6 +161,9 @@ export function generateModuleFiles(schema: ParsedSchema): GeneratedFile[] {
             })
         ) as Record<string, NestedRelationConnectMeta>;
 
+        const uploadFields = scalarFields.filter((f) => f.directives.includes('upload'));
+        const cacheConfig = model.cacheConfig ?? null;
+
         const templateData = {
             model,
             modelLower,
@@ -184,7 +187,23 @@ export function generateModuleFiles(schema: ParsedSchema): GeneratedFile[] {
             itemSelector,
             itemSelectorFieldMeta,
             itemPath,
+            cacheConfig,
+            uploadFields,
+            hasUploads: uploadFields.length > 0,
+            framework,
         };
+
+        const routesTemplate = framework === 'fastify'
+            ? 'module/routes-fastify.ts.ejs'
+            : 'module/routes.ts.ejs';
+        const testTemplate = framework === 'fastify'
+            ? 'module/test-fastify.ts.ejs'
+            : 'module/test.ts.ejs';
+
+        files.push({
+            path: `${modulePath}/${modelLower}.repository.ts`,
+            content: renderTemplate('module/repository.ts.ejs', templateData),
+        });
 
         files.push({
             path: `${modulePath}/${modelLower}.controller.ts`,
@@ -198,7 +217,7 @@ export function generateModuleFiles(schema: ParsedSchema): GeneratedFile[] {
 
         files.push({
             path: `${modulePath}/${modelLower}.routes.ts`,
-            content: renderTemplate('module/routes.ts.ejs', templateData),
+            content: renderTemplate(routesTemplate, templateData),
         });
 
         files.push({
@@ -208,7 +227,7 @@ export function generateModuleFiles(schema: ParsedSchema): GeneratedFile[] {
 
         files.push({
             path: `${modulePath}/${modelLower}.test.ts`,
-            content: renderTemplate('module/test.ts.ejs', templateData),
+            content: renderTemplate(testTemplate, templateData),
         });
     }
 
