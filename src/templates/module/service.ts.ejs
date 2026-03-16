@@ -12,6 +12,12 @@ const CACHE_TTL = <%= cacheConfig.ttl %>;
 const CACHE_PREFIX = '<%= h.toCamelCase(model.name) %>';
 const CACHE_VERSION_KEY = `${CACHE_PREFIX}:v`;
 <% } -%>
+<% if (isEvent) { -%>
+import { eventBus } from '../../utils/event-bus.js';
+<% } -%>
+<% if (isAudit) { -%>
+import { writeAuditLog } from '../../utils/audit.js';
+<% } -%>
 
 /**
  * <%= model.name %> Service
@@ -35,9 +41,52 @@ export class <%= model.name %>Service {
   }
 <% } -%>
 
+<% if (cursorConfig) { -%>
+  /**
+   * Find many <%= h.pluralize(h.toCamelCase(model.name)) %> with cursor-based pagination.
+   */
+<% if (multitenancyConfig) { -%>
+  async findManyCursor(
+    cursor: <%= cursorFieldMeta?.tsType ?? 'string' %> | null,
+    pageSize: number,
+    direction: 'forward' | 'backward' = 'forward',
+    tenantId: string,
+    options?: { where?: Record<string, unknown>; include?: Record<string, boolean> },
+  ): Promise<{ data: <%= model.name %>[]; hasMore: boolean; nextCursor: string | null }> {
+    const where = { ...options?.where, <%= multitenancyConfig.field %>: tenantId };
+    return this.repo.findManyCursor(cursor, pageSize, direction, { ...options, where });
+  }
+<% } else { -%>
+  async findManyCursor(
+    cursor: <%= cursorFieldMeta?.tsType ?? 'string' %> | null,
+    pageSize: number,
+    direction: 'forward' | 'backward' = 'forward',
+    options?: { where?: Record<string, unknown>; include?: Record<string, boolean> },
+  ): Promise<{ data: <%= model.name %>[]; hasMore: boolean; nextCursor: string | null }> {
+    return this.repo.findManyCursor(cursor, pageSize, direction, options);
+  }
+<% } -%>
+
+<% } -%>
   /**
    * Find many <%= h.pluralize(h.toCamelCase(model.name)) %> with pagination, sorting, and filtering.
    */
+<% if (multitenancyConfig) { -%>
+  async findMany(options: QueryOptions, tenantId: string): Promise<{ data: <%= model.name %>[]; total: number }> {
+    const scopedOptions = { ...options, where: { ...options.where, <%= multitenancyConfig.field %>: tenantId } };
+<% if (cacheConfig) { -%>
+    const version = await this.getCacheVersion();
+    const cacheKey = `${CACHE_PREFIX}:v:${version}:list:${JSON.stringify(scopedOptions)}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(cached) as { data: <%= model.name %>[]; total: number };
+    const result = await this.repo.findMany(scopedOptions);
+    await redis.set(cacheKey, JSON.stringify(result), { EX: CACHE_TTL });
+    return result;
+<% } else { -%>
+    return this.repo.findMany(scopedOptions);
+<% } -%>
+  }
+<% } else { -%>
   async findMany(options: QueryOptions): Promise<{ data: <%= model.name %>[]; total: number }> {
 <% if (cacheConfig) { -%>
     const version = await this.getCacheVersion();
@@ -51,11 +100,16 @@ export class <%= model.name %>Service {
     return this.repo.findMany(options);
 <% } -%>
   }
+<% } -%>
 
 <% if (itemSelector) { -%>
   /**
    * Find a single <%= h.toCamelCase(model.name) %> by key.
    */
+<% if (multitenancyConfig) { -%>
+  async findOne(key: <%= model.name %>Key, tenantId: string, include?: Record<string, boolean>): Promise<<%= model.name %> | null> {
+    return this.repo.findOneScoped(key, tenantId, include);
+<% } else { -%>
   async findOne(key: <%= model.name %>Key, include?: Record<string, boolean>): Promise<<%= model.name %> | null> {
 <% if (cacheConfig) { -%>
     const version = await this.getCacheVersion();
@@ -68,13 +122,18 @@ export class <%= model.name %>Service {
 <% } else { -%>
     return this.repo.findOne(key, include);
 <% } -%>
+<% } -%>
   }
 <% } -%>
 
   /**
    * Create a new <%= h.toCamelCase(model.name) %>.
    */
+<% if (isAudit) { -%>
+  async create(data: Create<%= model.name %>Input, changedBy?: string): Promise<<%= model.name %>> {
+<% } else { -%>
   async create(data: Create<%= model.name %>Input): Promise<<%= model.name %>> {
+<% } -%>
 <% if (model.isAuthModel && model.passwordField) { -%>
     const createData: Record<string, unknown> = { ...data };
     if (typeof createData.<%= model.passwordField %> === 'string') {
@@ -87,6 +146,12 @@ export class <%= model.name %>Service {
 <% if (cacheConfig) { -%>
     await this.bumpCacheVersion();
 <% } -%>
+<% if (isEvent) { -%>
+    eventBus.emit('<%= model.name %>', 'created', result);
+<% } -%>
+<% if (isAudit) { -%>
+    await writeAuditLog({ model: '<%= model.name %>', recordId: String((result as any).id ?? ''), action: 'CREATE', changedBy, after: result as any });
+<% } -%>
     return result;
   }
 
@@ -94,7 +159,14 @@ export class <%= model.name %>Service {
   /**
    * Update a <%= h.toCamelCase(model.name) %> by key.
    */
+<% if (isAudit) { -%>
+  async update(key: <%= model.name %>Key, data: Create<%= model.name %>Input | Patch<%= model.name %>Input, changedBy?: string): Promise<<%= model.name %>> {
+<% } else { -%>
   async update(key: <%= model.name %>Key, data: Create<%= model.name %>Input | Patch<%= model.name %>Input): Promise<<%= model.name %>> {
+<% } -%>
+<% if (isAudit) { -%>
+    const before = await this.repo.findOne(key);
+<% } -%>
 <% if (model.isAuthModel && model.passwordField) { -%>
     const updateData: Record<string, unknown> = { ...data };
     if (typeof updateData.<%= model.passwordField %> === 'string') {
@@ -107,16 +179,45 @@ export class <%= model.name %>Service {
 <% if (cacheConfig) { -%>
     await this.bumpCacheVersion();
 <% } -%>
+<% if (isEvent) { -%>
+    eventBus.emit('<%= model.name %>', 'updated', result);
+<% } -%>
+<% if (isAudit) { -%>
+    await writeAuditLog({ model: '<%= model.name %>', recordId: String((result as any).id ?? ''), action: 'UPDATE', changedBy, before: before as any, after: result as any });
+<% } -%>
     return result;
   }
 
   /**
    * Delete a <%= h.toCamelCase(model.name) %> by key.
    */
+<% if (isAudit) { -%>
+  async delete(key: <%= model.name %>Key, changedBy?: string): Promise<void> {
+<% } else { -%>
   async delete(key: <%= model.name %>Key): Promise<void> {
+<% } -%>
+<% if (isAudit || isEvent || (hasUploads)) { -%>
+    const record = await this.repo.findOne(key);
+<% } -%>
+<% if (hasUploads) { -%>
+    if (record) {
+      const { unlink } = await import('fs/promises');
+<%   for (const uf of uploadFields) { -%>
+      if ((record as any).<%= uf.name %>) {
+        await unlink(String((record as any).<%= uf.name %>)).catch(() => {});
+      }
+<%   } -%>
+    }
+<% } -%>
     await this.repo.delete(key);
 <% if (cacheConfig) { -%>
     await this.bumpCacheVersion();
+<% } -%>
+<% if (isEvent) { -%>
+    eventBus.emit('<%= model.name %>', 'deleted', record ?? key);
+<% } -%>
+<% if (isAudit) { -%>
+    await writeAuditLog({ model: '<%= model.name %>', recordId: String((key as any).id ?? JSON.stringify(key)), action: 'DELETE', changedBy, before: record as any });
 <% } -%>
   }
 <% } -%>

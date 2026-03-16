@@ -52,6 +52,41 @@ export class <%= model.name %>Repository {
   }
 
 <% } -%>
+<% if (cursorConfig) { -%>
+  async findManyCursor(
+    cursor: <%= cursorFieldMeta?.tsType ?? 'string' %> | null,
+    pageSize: number,
+    direction: 'forward' | 'backward' = 'forward',
+    options?: { where?: Record<string, unknown>; include?: Record<string, boolean> },
+  ): Promise<{ data: <%= model.name %>[]; hasMore: boolean; nextCursor: string | null }> {
+<% if (includeRelations.length > 0) { -%>
+    const include = options?.include ? this.toInclude(options.include) : undefined;
+<% } -%>
+    const take = (direction === 'backward' ? -1 : 1) * (pageSize + 1);
+    const findArgs: Record<string, unknown> = {
+      take,
+      orderBy: { <%= cursorConfig.field %>: direction === 'backward' ? 'desc' : 'asc' },
+<% if (isSoftDelete) { -%>
+      where: { ...options?.where, deletedAt: null },
+<% } else { -%>
+      ...(options?.where ? { where: options.where } : {}),
+<% } -%>
+<% if (includeRelations.length > 0) { -%>
+      ...(include ? { include } : {}),
+<% } -%>
+    };
+    if (cursor) {
+      findArgs.cursor = { <%= cursorConfig.field %>: cursor };
+      findArgs.skip = 1;
+    }
+    const results = await prisma.<%= h.toCamelCase(model.name) %>.findMany(findArgs as any);
+    const hasMore = results.length > pageSize;
+    const data = hasMore ? results.slice(0, pageSize) : results;
+    const nextCursor = data.length > 0 ? String((data[data.length - 1] as any).<%= cursorConfig.field %>) : null;
+    return { data, hasMore, nextCursor };
+  }
+
+<% } -%>
   async findMany(options: QueryOptions): Promise<{ data: <%= model.name %>[]; total: number }> {
 <% if (includeRelations.length > 0) { -%>
     const include = this.toInclude(options.include);
@@ -79,6 +114,20 @@ export class <%= model.name %>Repository {
     return { data, total };
   }
 
+<% if (multitenancyConfig && itemSelector) { -%>
+  async findOneScoped(key: <%= model.name %>Key, tenantId: string, include?: Record<string, boolean>): Promise<<%= model.name %> | null> {
+<% if (includeRelations.length > 0) { -%>
+    const normalizedInclude = this.toInclude(include);
+<% } -%>
+    return prisma.<%= h.toCamelCase(model.name) %>.findFirst({
+      where: { ...this.toWhereUnique(key), <%= multitenancyConfig.field %>: tenantId<% if (isSoftDelete) { %>, deletedAt: null<% } %> },
+<% if (includeRelations.length > 0) { -%>
+      ...(normalizedInclude ? { include: normalizedInclude } : {}),
+<% } -%>
+    });
+  }
+
+<% } -%>
 <% if (itemSelector) { -%>
   async findOne(key: <%= model.name %>Key, include?: Record<string, boolean>): Promise<<%= model.name %> | null> {
 <% if (includeRelations.length > 0) { -%>

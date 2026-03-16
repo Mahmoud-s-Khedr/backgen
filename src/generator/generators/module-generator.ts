@@ -110,6 +110,9 @@ export function generateModuleFiles(schema: ParsedSchema, framework: 'express' |
         const itemSelectorFieldMeta = itemSelector
             ? itemSelector.fields.map((fieldName) => getSelectorFieldMeta(model, fieldName))
             : [];
+        const cursorFieldMeta = model.cursorConfig
+            ? getSelectorFieldMeta(model, model.cursorConfig.field)
+            : null;
         const defaultSortField = (
             itemSelector?.fields.find((fieldName) => filterableFields.includes(fieldName))
             || filterableFields[0]
@@ -124,13 +127,15 @@ export function generateModuleFiles(schema: ParsedSchema, framework: 'express' |
                 .filter((nr) => nr.relationField)
                 .flatMap((nr) => nr.relationField!.split(',').map((f) => f.trim()).filter(Boolean))
         );
+        const tenantField = model.multitenancyConfig?.field;
         const createFields = scalarFields.filter(
             (f) =>
                 !f.isId &&
                 !f.directives.includes('hidden') &&
                 !f.directives.includes('readonly') &&
                 (!f.isServerDefault || f.directives.includes('writeOnly')) &&
-                !nestedFkFields.has(f.name)
+                !nestedFkFields.has(f.name) &&
+                f.name !== tenantField
         );
         const nestedRelationConnectMeta = Object.fromEntries(
             nestedRelations.map((relation) => {
@@ -163,6 +168,10 @@ export function generateModuleFiles(schema: ParsedSchema, framework: 'express' |
 
         const uploadFields = scalarFields.filter((f) => f.directives.includes('upload'));
         const cacheConfig = model.cacheConfig ?? null;
+        const isEvent = model.isEvent ?? false;
+        const isAudit = model.isAudit ?? false;
+        const multitenancyConfig = model.multitenancyConfig ?? null;
+        const hasAnyAudit = schema.models.some((m) => m.isAudit);
 
         const templateData = {
             model,
@@ -190,6 +199,13 @@ export function generateModuleFiles(schema: ParsedSchema, framework: 'express' |
             cacheConfig,
             uploadFields,
             hasUploads: uploadFields.length > 0,
+            rateLimitConfig: model.rateLimitConfig ?? null,
+            cursorConfig: model.cursorConfig ?? null,
+            cursorFieldMeta,
+            isEvent,
+            isAudit,
+            multitenancyConfig,
+            hasAnyAudit,
             framework,
         };
 

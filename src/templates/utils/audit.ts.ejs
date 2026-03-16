@@ -1,0 +1,32 @@
+import { prisma } from '../config/database.js';
+
+export interface AuditLogEntry {
+  model: string;
+  recordId: string;
+  action: 'CREATE' | 'UPDATE' | 'DELETE';
+  changedBy?: string;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+}
+
+/**
+ * Write an audit log entry to the AuditLog table.
+ * Fails silently to avoid breaking the primary operation.
+ */
+export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
+  try {
+    await (prisma as any).auditLog.create({
+      data: {
+        model: entry.model,
+        recordId: entry.recordId,
+        action: entry.action,
+        changedBy: entry.changedBy ?? null,
+        before: entry.before ? JSON.parse(JSON.stringify(entry.before)) : undefined,
+        after: entry.after ? JSON.parse(JSON.stringify(entry.after)) : undefined,
+      },
+    });
+  } catch {
+    // Audit logging should never break the primary operation
+    console.error('[audit] Failed to write audit log:', entry);
+  }
+}

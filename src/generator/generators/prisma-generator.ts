@@ -398,10 +398,30 @@ export function generatePrismaFiles(schema: ParsedSchema, schemaContent?: string
     ];
 
     if (schemaContent) {
-        const cleanedSchema = schemaContent
+        let cleanedSchema = schemaContent
             .replace(BCM_DIRECTIVE_REGEX, '')
             .replace(/^[ \t]*url\s*=\s*(?:env\([^)]+\)|"[^"]*"|'[^']*')[ \t]*\n?/gm, '')
             .replace(/\n{3,}/g, '\n\n');
+
+        // Auto-append AuditLog model when any model uses @bcm.audit
+        const hasAudit = schema.models.some((m) => m.isAudit);
+        if (hasAudit && !cleanedSchema.includes('model AuditLog')) {
+            cleanedSchema += `
+model AuditLog {
+  id        String   @id @default(uuid())
+  model     String
+  recordId  String
+  action    String
+  changedBy String?
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([model, recordId])
+}
+`;
+        }
+
         files.unshift({
             path: 'prisma/schema.prisma',
             content: cleanedSchema,

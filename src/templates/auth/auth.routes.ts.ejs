@@ -61,6 +61,9 @@ router.post('/login', validate(LoginSchema), async (req, res, next) => {
 <% if (roleField) { -%>
         role: user.<%= roleField %>,
 <% } -%>
+<% for (const fieldName of multitenancyClaimFields) { -%>
+        <%= fieldName %>: user.<%= fieldName %>,
+<% } -%>
 <% if (identifierField !== 'id') { -%>
         <%= identifierField %>: user.<%= identifierField %>,
 <% } -%>
@@ -108,6 +111,9 @@ router.post('/refresh', validate(RefreshSchema), async (req, res, next) => {
         sub: userId,
 <% if (roleField) { -%>
         role: user.<%= roleField %>,
+<% } -%>
+<% for (const fieldName of multitenancyClaimFields) { -%>
+        <%= fieldName %>: user.<%= fieldName %>,
 <% } -%>
 <% if (identifierField !== 'id') { -%>
         <%= identifierField %>: user.<%= identifierField %>,

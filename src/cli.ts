@@ -8,6 +8,8 @@ import { initCommand } from './commands/init.js';
 import { generateCommand } from './commands/generate.js';
 import { ejectCommand } from './commands/eject.js';
 import { validateCommand } from './commands/validate.js';
+import { addCommand } from './commands/add.js';
+import { diffCommand } from './commands/diff.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -63,6 +65,42 @@ program
         'express'
     )
     .action(generateCommand);
+
+program
+    .command('add')
+    .description('Add a new module for a specific model from the schema')
+    .argument('<model>', 'Model name from the Prisma schema (e.g., Comment)')
+    .requiredOption(
+        '-s, --schema <path>',
+        'Path to the Prisma schema file (.prisma)'
+    )
+    .requiredOption('-o, --output <path>', 'Output directory of the existing generated project')
+    .option('--json', 'Output machine-readable JSON only', false)
+    .option('--force', 'Overwrite existing module directory', false)
+    .option(
+        '--framework <name>',
+        'Target framework: express (default) or fastify',
+        parseFramework,
+        'express'
+    )
+    .action(addCommand);
+
+program
+    .command('diff')
+    .description('Show what would change if you regenerated from the current schema')
+    .requiredOption(
+        '-s, --schema <path>',
+        'Path to the Prisma schema file (.prisma)'
+    )
+    .requiredOption('-o, --output <path>', 'Output directory to compare against')
+    .option('--json', 'Output machine-readable JSON only', false)
+    .option(
+        '--framework <name>',
+        'Target framework: express (default) or fastify',
+        parseFramework,
+        'express'
+    )
+    .action(diffCommand);
 
 program
     .command('eject')

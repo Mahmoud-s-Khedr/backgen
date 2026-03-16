@@ -53,6 +53,9 @@ export async function authRoutes(fastify: FastifyInstance) {
 <% if (roleField) { -%>
         role: user.<%= roleField %>,
 <% } -%>
+<% for (const fieldName of multitenancyClaimFields) { -%>
+        <%= fieldName %>: user.<%= fieldName %>,
+<% } -%>
 <% if (identifierField !== 'id') { -%>
         <%= identifierField %>: user.<%= identifierField %>,
 <% } -%>
@@ -99,6 +102,9 @@ export async function authRoutes(fastify: FastifyInstance) {
         sub: userId,
 <% if (roleField) { -%>
         role: user.<%= roleField %>,
+<% } -%>
+<% for (const fieldName of multitenancyClaimFields) { -%>
+        <%= fieldName %>: user.<%= fieldName %>,
 <% } -%>
 <% if (identifierField !== 'id') { -%>
         <%= identifierField %>: user.<%= identifierField %>,

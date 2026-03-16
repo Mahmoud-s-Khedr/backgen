@@ -3,10 +3,10 @@
 // ============================================================
 
 /** Prisma field directives extracted from /// @bcm.* comments */
-export type FieldDirective = 'hidden' | 'readonly' | 'writeOnly' | 'searchable' | 'nested' | 'identifier' | 'password' | 'upload';
+export type FieldDirective = 'hidden' | 'readonly' | 'writeOnly' | 'searchable' | 'nested' | 'identifier' | 'password' | 'upload' | 'transform';
 
 /** Directives that apply at the model level */
-export type ModelDirective = 'protected' | 'softDelete' | 'auth' | 'authModel' | 'cache';
+export type ModelDirective = 'protected' | 'softDelete' | 'auth' | 'authModel' | 'cache' | 'rateLimit' | 'cursor' | 'event' | 'audit' | 'multitenancy';
 
 /** Complete parsed schema representation */
 export interface ParsedSchema {
@@ -28,6 +28,29 @@ export interface UploadConfig {
     mimeTypes?: string[];
 }
 
+/** Transform configuration from @bcm.transform(trim: true, lowercase: true) */
+export interface TransformConfig {
+    trim?: boolean;
+    lowercase?: boolean;
+    uppercase?: boolean;
+}
+
+/** Rate limit configuration from @bcm.rateLimit(max: 10, window: "1m") */
+export interface RateLimitConfig {
+    max: number;
+    windowMs: number;
+}
+
+/** Cursor pagination configuration from @bcm.cursor(field: "createdAt") */
+export interface CursorConfig {
+    field: string;
+}
+
+/** Multitenancy configuration from @bcm.multitenancy(field: "orgId") */
+export interface MultitenancyConfig {
+    field: string;
+}
+
 /** A single Prisma model with all its metadata */
 export interface ModelDefinition {
     name: string;
@@ -46,6 +69,16 @@ export interface ModelDefinition {
     roleField?: string;
     /** Cache configuration from @bcm.cache directive */
     cacheConfig?: CacheConfig;
+    /** Rate limit configuration from @bcm.rateLimit directive */
+    rateLimitConfig?: RateLimitConfig;
+    /** Cursor pagination configuration from @bcm.cursor directive */
+    cursorConfig?: CursorConfig;
+    /** Whether this model emits typed events after mutations */
+    isEvent?: boolean;
+    /** Whether this model auto-writes audit logs on mutations */
+    isAudit?: boolean;
+    /** Multitenancy configuration from @bcm.multitenancy directive */
+    multitenancyConfig?: MultitenancyConfig;
 }
 
 /** A model selector that can uniquely identify a single record */
@@ -100,6 +133,8 @@ export interface FieldDefinition {
     directives: FieldDirective[];
     /** Upload configuration from @bcm.upload directive */
     uploadConfig?: UploadConfig;
+    /** Transform configuration from @bcm.transform directive */
+    transformConfig?: TransformConfig;
 }
 
 /** A Prisma enum definition */

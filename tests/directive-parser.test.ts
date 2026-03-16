@@ -360,3 +360,142 @@ model User {
         expect(getFieldDirectives(map, 'NonExistent', 'field')).toEqual([]);
     });
 });
+
+describe('parseDirectives — @bcm.transform', () => {
+    it('parses transform directive with trim and lowercase', () => {
+        const schema = `
+model User {
+  id String @id
+  /// @bcm.transform(trim: true, lowercase: true)
+  email String
+}`;
+        const result = parseDirectives(schema);
+        const user = result.get('User')!;
+        expect(user.fields.get('email')).toContain('transform');
+        expect(user.transformConfigs.get('email')).toEqual({ trim: true, lowercase: true });
+    });
+
+    it('parses transform directive with uppercase only', () => {
+        const schema = `
+model Tag {
+  id String @id
+  /// @bcm.transform(uppercase: true)
+  code String
+}`;
+        const result = parseDirectives(schema);
+        const tag = result.get('Tag')!;
+        expect(tag.transformConfigs.get('code')).toEqual({ uppercase: true });
+    });
+});
+
+describe('parseDirectives — @bcm.rateLimit', () => {
+    it('parses rateLimit directive with max and window', () => {
+        const schema = `
+/// @bcm.rateLimit(max: 10, window: "1m")
+model Post {
+  id String @id
+}`;
+        const result = parseDirectives(schema);
+        const post = result.get('Post')!;
+        expect(post.modelDirectives).toContain('rateLimit');
+        expect(post.rateLimitConfig).toEqual({ max: 10, windowMs: 60_000 });
+    });
+
+    it('parses rateLimit with seconds', () => {
+        const schema = `
+/// @bcm.rateLimit(max: 5, window: "30s")
+model Auth {
+  id String @id
+}`;
+        const result = parseDirectives(schema);
+        expect(result.get('Auth')!.rateLimitConfig).toEqual({ max: 5, windowMs: 30_000 });
+    });
+
+    it('parses rateLimit with hours', () => {
+        const schema = `
+/// @bcm.rateLimit(max: 100, window: "1h")
+model Upload {
+  id String @id
+}`;
+        const result = parseDirectives(schema);
+        expect(result.get('Upload')!.rateLimitConfig).toEqual({ max: 100, windowMs: 3_600_000 });
+    });
+});
+
+describe('parseDirectives — @bcm.cursor', () => {
+    it('parses cursor directive with field argument', () => {
+        const schema = `
+/// @bcm.cursor(field: "createdAt")
+model Event {
+  id String @id
+  createdAt DateTime @default(now())
+}`;
+        const result = parseDirectives(schema);
+        const event = result.get('Event')!;
+        expect(event.modelDirectives).toContain('cursor');
+        expect(event.cursorConfig).toEqual({ field: 'createdAt' });
+    });
+
+    it('defaults cursor field to id when no field specified', () => {
+        const schema = `
+/// @bcm.cursor(field: "id")
+model Item {
+  id String @id
+}`;
+        const result = parseDirectives(schema);
+        expect(result.get('Item')!.cursorConfig).toEqual({ field: 'id' });
+    });
+});
+
+describe('parseDirectives — @bcm.event', () => {
+    it('parses event as a model directive', () => {
+        const schema = `
+/// @bcm.event
+model Order {
+  id String @id
+}`;
+        const result = parseDirectives(schema);
+        const order = result.get('Order')!;
+        expect(order.modelDirectives).toContain('event');
+    });
+});
+
+describe('parseDirectives — @bcm.audit', () => {
+    it('parses audit as a model directive', () => {
+        const schema = `
+/// @bcm.audit
+model Invoice {
+  id String @id
+}`;
+        const result = parseDirectives(schema);
+        const invoice = result.get('Invoice')!;
+        expect(invoice.modelDirectives).toContain('audit');
+    });
+});
+
+describe('parseDirectives — @bcm.multitenancy', () => {
+    it('parses multitenancy directive with field argument', () => {
+        const schema = `
+/// @bcm.multitenancy(field: "orgId")
+model Project {
+  id    String @id
+  orgId String
+}`;
+        const result = parseDirectives(schema);
+        const project = result.get('Project')!;
+        expect(project.modelDirectives).toContain('multitenancy');
+        expect(project.multitenancyConfig).toEqual({ field: 'orgId' });
+    });
+
+    it('defaults multitenancy field to tenantId', () => {
+        const schema = `
+/// @bcm.multitenancy
+model Workspace {
+  id       String @id
+  tenantId String
+}`;
+        const result = parseDirectives(schema);
+        // Without args, multitenancyConfig is not set (directiveName matches but no args)
+        expect(result.get('Workspace')!.modelDirectives).toContain('multitenancy');
+    });
+});

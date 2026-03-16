@@ -11,6 +11,22 @@ export function generateAppFiles(schema: ParsedSchema, framework: 'express' | 'f
     const authModelLower = authModel
         ? authModel.name.charAt(0).toLowerCase() + authModel.name.slice(1)
         : undefined;
+    const multitenancyClaimFields = authModel
+        ? [...new Set(
+            schema.models
+                .map((model) => model.multitenancyConfig?.field)
+                .filter((field): field is string => Boolean(field))
+        )].filter((fieldName) => (
+            fieldName !== authModel.identifierField
+            && fieldName !== authModel.roleField
+            && fieldName !== 'id'
+            && authModel.fields.some((field) => (
+                field.name === fieldName
+                && !field.isRelation
+                && !field.isList
+            ))
+        ))
+        : [];
 
     const data = {
         models: schema.models,
@@ -42,6 +58,7 @@ export function generateAppFiles(schema: ParsedSchema, framework: 'express' | 'f
             identifierField: authModel.identifierField,
             passwordField: authModel.passwordField,
             roleField: authModel.roleField,
+            multitenancyClaimFields,
             framework,
         };
         files.push({

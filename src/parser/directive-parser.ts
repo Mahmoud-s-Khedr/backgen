@@ -1,4 +1,4 @@
-import type { FieldDirective, ModelDirective, CacheConfig, UploadConfig } from './types.js';
+import type { FieldDirective, ModelDirective, CacheConfig, UploadConfig, TransformConfig, RateLimitConfig, CursorConfig, MultitenancyConfig } from './types.js';
 
 /** Result of parsing directives for a single field */
 export interface DirectiveResult {
@@ -13,8 +13,12 @@ export interface ModelDirectivesResult {
     modelDirectives: ModelDirective[];
     authRoles?: string[];
     cacheConfig?: CacheConfig;
+    rateLimitConfig?: RateLimitConfig;
+    cursorConfig?: CursorConfig;
+    multitenancyConfig?: MultitenancyConfig;
     fields: Map<string, FieldDirective[]>;
     uploadConfigs: Map<string, UploadConfig>;
+    transformConfigs: Map<string, TransformConfig>;
     warnings: string[];
 }
 
@@ -29,6 +33,7 @@ const VALID_FIELD_DIRECTIVES: Set<string> = new Set([
     'identifier',
     'password',
     'upload',
+    'transform',
 ]);
 
 const VALID_MODEL_DIRECTIVES: Set<string> = new Set([
@@ -37,6 +42,11 @@ const VALID_MODEL_DIRECTIVES: Set<string> = new Set([
     'auth',
     'authModel',
     'cache',
+    'rateLimit',
+    'cursor',
+    'event',
+    'audit',
+    'multitenancy',
 ]);
 
 /**
@@ -73,6 +83,59 @@ function parseUploadArgs(rawArgs: string): UploadConfig {
     return { dest, ...(maxSize !== undefined ? { maxSize } : {}), ...(mimeTypes ? { mimeTypes } : {}) };
 }
 
+/**
+ * Parse @bcm.transform(trim: true, lowercase: true) arguments.
+ */
+function parseTransformArgs(rawArgs: string): TransformConfig {
+    const config: TransformConfig = {};
+    if (/trim:\s*true/.test(rawArgs)) config.trim = true;
+    if (/lowercase:\s*true/.test(rawArgs)) config.lowercase = true;
+    if (/uppercase:\s*true/.test(rawArgs)) config.uppercase = true;
+    return config;
+}
+
+/**
+ * Parse @bcm.rateLimit(max: 10, window: "1m") arguments.
+ */
+function parseRateLimitArgs(rawArgs: string): RateLimitConfig {
+    const maxMatch = rawArgs.match(/max:\s*(\d+)/);
+    const windowMatch = rawArgs.match(/window:\s*["']([^"']+)["']/);
+    const max = maxMatch ? parseInt(maxMatch[1], 10) : 100;
+    const windowMs = windowMatch ? parseDuration(windowMatch[1]) : 60_000;
+    return { max, windowMs };
+}
+
+/**
+ * Parse a duration string like "1m", "30s", "1h" into milliseconds.
+ */
+function parseDuration(str: string): number {
+    const match = str.match(/^(\d+)(ms|s|m|h)$/);
+    if (!match) return 60_000;
+    const value = parseInt(match[1], 10);
+    const unit = match[2];
+    if (unit === 'ms') return value;
+    if (unit === 's') return value * 1000;
+    if (unit === 'm') return value * 60_000;
+    if (unit === 'h') return value * 3_600_000;
+    return 60_000;
+}
+
+/**
+ * Parse @bcm.cursor(field: "createdAt") arguments.
+ */
+function parseCursorArgs(rawArgs: string): CursorConfig {
+    const fieldMatch = rawArgs.match(/field:\s*["']([^"']+)["']/);
+    return { field: fieldMatch ? fieldMatch[1] : 'id' };
+}
+
+/**
+ * Parse @bcm.multitenancy(field: "orgId") arguments.
+ */
+function parseMultitenancyArgs(rawArgs: string): MultitenancyConfig {
+    const fieldMatch = rawArgs.match(/field:\s*["']([^"']+)["']/);
+    return { field: fieldMatch ? fieldMatch[1] : 'tenantId' };
+}
+
 const CONFLICTING_PAIRS: [FieldDirective, FieldDirective][] = [
     ['hidden', 'writeOnly'],   // contradictory: hidden excludes from inputs, writeOnly accepts in inputs
     ['hidden', 'readonly'],    // redundant: hidden already excludes from inputs and outputs; readonly only excludes inputs
@@ -105,7 +168,11 @@ export function parseDirectives(
     let pendingModelDirectives: ModelDirective[] = [];
     let pendingAuthRoles: string[] = [];
     let pendingCacheConfig: CacheConfig | undefined;
+    let pendingRateLimitConfig: RateLimitConfig | undefined;
+    let pendingCursorConfig: CursorConfig | undefined;
+    let pendingMultitenancyConfig: MultitenancyConfig | undefined;
     let pendingUploadConfig: UploadConfig | undefined;
+    let pendingTransformConfig: TransformConfig | undefined;
     let pendingWarnings: string[] = []; // Warnings collected outside model blocks.
 
     for (let i = 0; i < lines.length; i++) {
@@ -121,6 +188,7 @@ export function parseDirectives(
                 modelDirectives: [],
                 fields: new Map(),
                 uploadConfigs: new Map(),
+                transformConfigs: new Map(),
                 warnings: [],
             };
             result.modelDirectives.push(...pendingModelDirectives);
@@ -130,12 +198,24 @@ export function parseDirectives(
             if (pendingCacheConfig) {
                 result.cacheConfig = pendingCacheConfig;
             }
+            if (pendingRateLimitConfig) {
+                result.rateLimitConfig = pendingRateLimitConfig;
+            }
+            if (pendingCursorConfig) {
+                result.cursorConfig = pendingCursorConfig;
+            }
+            if (pendingMultitenancyConfig) {
+                result.multitenancyConfig = pendingMultitenancyConfig;
+            }
             result.warnings.push(...pendingWarnings);
             results.set(currentModel, result);
             pendingFieldDirectives = [];
             pendingModelDirectives = [];
             pendingAuthRoles = [];
             pendingCacheConfig = undefined;
+            pendingRateLimitConfig = undefined;
+            pendingCursorConfig = undefined;
+            pendingMultitenancyConfig = undefined;
             pendingWarnings = [];
             continue;
         }
@@ -175,6 +255,15 @@ export function parseDirectives(
                     if (directiveName === 'cache') {
                         pendingCacheConfig = parseCacheArgs(directiveArgs ?? '');
                     }
+                    if (directiveName === 'rateLimit' && directiveArgs) {
+                        pendingRateLimitConfig = parseRateLimitArgs(directiveArgs);
+                    }
+                    if (directiveName === 'cursor' && directiveArgs) {
+                        pendingCursorConfig = parseCursorArgs(directiveArgs);
+                    }
+                    if (directiveName === 'multitenancy' && directiveArgs) {
+                        pendingMultitenancyConfig = parseMultitenancyArgs(directiveArgs);
+                    }
                 }
                 continue;
             }
@@ -190,6 +279,9 @@ export function parseDirectives(
                 pendingFieldDirectives.push(directiveName as FieldDirective);
                 if (directiveName === 'upload' && directiveArgs) {
                     pendingUploadConfig = parseUploadArgs(directiveArgs);
+                }
+                if (directiveName === 'transform' && directiveArgs) {
+                    pendingTransformConfig = parseTransformArgs(directiveArgs);
                 }
                 continue;
             }
@@ -229,9 +321,13 @@ export function parseDirectives(
                 if (pendingUploadConfig) {
                     result.uploadConfigs.set(fieldName, pendingUploadConfig);
                 }
+                if (pendingTransformConfig) {
+                    result.transformConfigs.set(fieldName, pendingTransformConfig);
+                }
             }
             pendingFieldDirectives = [];
             pendingUploadConfig = undefined;
+            pendingTransformConfig = undefined;
         }
     }
 
@@ -272,4 +368,15 @@ export function getFieldUploadConfig(
     fieldName: string
 ): UploadConfig | undefined {
     return directivesMap.get(modelName)?.uploadConfigs.get(fieldName);
+}
+
+/**
+ * Get transform config for a specific field in a model, if any.
+ */
+export function getFieldTransformConfig(
+    directivesMap: Map<string, ModelDirectivesResult>,
+    modelName: string,
+    fieldName: string
+): TransformConfig | undefined {
+    return directivesMap.get(modelName)?.transformConfigs.get(fieldName);
 }

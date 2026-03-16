@@ -114,7 +114,15 @@ export const Create<%= model.name %>Schema = z.object({
 <%   /* Skip FK fields that have a corresponding @bcm.nested relation */ -%>
 <%   const nestedForFk = nestedRelations.find(nr => nr.relationField && nr.relationField.split(', ').includes(field.name)); -%>
 <%   if (nestedForFk) continue; -%>
-<% const zodType = getFieldZodType(field); const isOpt = field.isOptional || field.hasDefault; -%>
+<%
+  let zodType = getFieldZodType(field);
+  const isOpt = field.isOptional || field.hasDefault;
+  if (field.transformConfig) {
+    if (field.transformConfig.trim) zodType += `.transform((v) => typeof v === 'string' ? v.trim() : v)`;
+    if (field.transformConfig.lowercase) zodType += `.transform((v) => typeof v === 'string' ? v.toLowerCase() : v)`;
+    if (field.transformConfig.uppercase) zodType += `.transform((v) => typeof v === 'string' ? v.toUpperCase() : v)`;
+  }
+-%>
   <%= field.name %>: <%= zodType %><%= isOpt ? '.optional()' : '' %>,<%= field.isUnique ? ' // Must be unique' : '' %>
 <% } -%>
 <% for (const nr of nestedRelations) { -%>

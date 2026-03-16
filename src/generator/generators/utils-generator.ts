@@ -9,8 +9,10 @@ export function generateUtilsFiles(
     framework: 'express' | 'fastify' = 'express'
 ): GeneratedFile[] {
     const data = { datasource: schema.datasource, framework };
+    const hasEvent = schema.models.some((m) => m.isEvent);
+    const hasAudit = schema.models.some((m) => m.isAudit);
 
-    return [
+    const files: GeneratedFile[] = [
         {
             path: 'src/utils/query-builder.ts',
             content: renderTemplate('utils/query-builder.ts.ejs', data),
@@ -23,4 +25,20 @@ export function generateUtilsFiles(
             ),
         },
     ];
+
+    if (hasEvent) {
+        files.push({
+            path: 'src/utils/event-bus.ts',
+            content: renderTemplate('utils/event-bus.ts.ejs', data),
+        });
+    }
+
+    if (hasAudit) {
+        files.push({
+            path: 'src/utils/audit.ts',
+            content: renderTemplate('utils/audit.ts.ejs', data),
+        });
+    }
+
+    return files;
 }

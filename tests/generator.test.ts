@@ -853,7 +853,7 @@ model Settings {
                     'RATE_LIMIT_MAX=100',
                 ].join('\n'), 'utf8');
 
-                await execFileAsync('pnpm', ['install'], {
+                await execFileAsync('npm', ['install'], {
                     cwd: workspace.root,
                     timeout: 240000,
                     maxBuffer: 1024 * 1024 * 20,
@@ -2574,7 +2574,7 @@ model Asset {
                     'RATE_LIMIT_MAX=100',
                 ].join('\n'), 'utf8');
 
-                await execFileAsync('pnpm', ['install'], {
+                await execFileAsync('npm', ['install'], {
                     cwd: workspace.root,
                     timeout: 240000,
                     maxBuffer: 1024 * 1024 * 20,
@@ -2704,6 +2704,410 @@ model Item {
                     }
                 }
             }
+        });
+    });
+
+    describe('@bcm.transform directive', () => {
+        const TRANSFORM_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id    String @id @default(cuid())
+  /// @bcm.transform(trim: true, lowercase: true)
+  email String @unique
+  /// @bcm.transform(trim: true)
+  name  String
+}
+`;
+
+        it('generates Zod .transform() chains in DTO for trimmed and lowercased fields', async () => {
+            const schema = parsePrismaAst(TRANSFORM_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, TRANSFORM_SCHEMA);
+            const dto = files.find((f) => f.path.endsWith('user.dto.ts'))!;
+
+            // email should have both trim and lowercase transforms
+            expect(dto.content).toContain("email: z.string().transform((v) => typeof v === 'string' ? v.trim() : v).transform((v) => typeof v === 'string' ? v.toLowerCase() : v)");
+            // name should only have trim
+            expect(dto.content).toContain("name: z.string().transform((v) => typeof v === 'string' ? v.trim() : v)");
+            // name should NOT have lowercase
+            expect(dto.content).not.toContain("name: z.string().transform((v) => typeof v === 'string' ? v.trim() : v).transform((v) => typeof v === 'string' ? v.toLowerCase() : v)");
+        });
+    });
+
+    describe('@bcm.rateLimit directive', () => {
+        const RATE_LIMIT_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.rateLimit(max: 5, window: "30s")
+model Submission {
+  id    String @id @default(cuid())
+  data  String
+}
+`;
+
+        it('generates routes with per-route rate limiting middleware', async () => {
+            const schema = parsePrismaAst(RATE_LIMIT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, RATE_LIMIT_SCHEMA);
+            const routes = files.find((f) => f.path.endsWith('submission.routes.ts'))!;
+
+            expect(routes.content).toContain('createRouteRateLimit');
+            expect(routes.content).toContain('createRouteRateLimit(5, 30000)');
+        });
+
+        it('generates rate limit factory in middleware', async () => {
+            const schema = parsePrismaAst(RATE_LIMIT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'middleware' }, RATE_LIMIT_SCHEMA);
+            const middleware = files.find((f) => f.path.endsWith('rate-limit.middleware.ts'))!;
+
+            expect(middleware.content).toContain('export function createRouteRateLimit');
+            expect(middleware.content).toContain('windowMs');
+        });
+    });
+
+    describe('@bcm.cursor directive', () => {
+        const CURSOR_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.cursor(field: "createdAt")
+model Event {
+  id        String   @id @default(cuid())
+  title     String
+  createdAt DateTime @unique @default(now())
+}
+`;
+
+        it('generates cursor pagination endpoint in routes', async () => {
+            const schema = parsePrismaAst(CURSOR_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, CURSOR_SCHEMA);
+            const routes = files.find((f) => f.path.endsWith('event.routes.ts'))!;
+
+            expect(routes.content).toContain("router.get('/cursor'");
+            expect(routes.content).toContain('controller.listCursor');
+        });
+
+        it('generates findManyCursor in repository', async () => {
+            const schema = parsePrismaAst(CURSOR_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, CURSOR_SCHEMA);
+            const repo = files.find((f) => f.path.endsWith('event.repository.ts'))!;
+
+            expect(repo.content).toContain('findManyCursor');
+            expect(repo.content).toContain('createdAt');
+            expect(repo.content).toContain('hasMore');
+            expect(repo.content).toContain('nextCursor');
+        });
+
+        it('generates findManyCursor in service', async () => {
+            const schema = parsePrismaAst(CURSOR_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, CURSOR_SCHEMA);
+            const service = files.find((f) => f.path.endsWith('event.service.ts'))!;
+
+            expect(service.content).toContain('findManyCursor');
+        });
+
+        it('generates listCursor in controller', async () => {
+            const schema = parsePrismaAst(CURSOR_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, CURSOR_SCHEMA);
+            const controller = files.find((f) => f.path.endsWith('event.controller.ts'))!;
+
+            expect(controller.content).toContain('listCursor');
+            expect(controller.content).toContain('cursor');
+            expect(controller.content).toContain('pageSize');
+            expect(controller.content).toContain('direction');
+        });
+
+        it('rejects cursor fields that are not single-field selectors', async () => {
+            const raw = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.cursor(field: "createdAt")
+model Event {
+  id        String   @id @default(cuid())
+  title     String
+  createdAt DateTime @default(now())
+}
+`;
+            const schema = parsePrismaAst(raw);
+            await expect(
+                generateProject(schema, { ...defaultOptions, only: 'routes' }, raw)
+            ).rejects.toThrow('@bcm.cursor(field: "createdAt")');
+        });
+    });
+});
+
+describe('Phase 3 — service-layer directives', () => {
+    describe('@bcm.event directive', () => {
+        const EVENT_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.event
+model Order {
+  id     String @id @default(cuid())
+  amount Float
+}
+`;
+
+        it('generates event-bus utility when any model has @bcm.event', async () => {
+            const schema = parsePrismaAst(EVENT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'utils' }, EVENT_SCHEMA);
+            const eventBus = files.find((f) => f.path.includes('event-bus'));
+            expect(eventBus).toBeDefined();
+            expect(eventBus!.content).toContain('TypedEventBus');
+            expect(eventBus!.content).toContain('emit');
+        });
+
+        it('service emits events after mutations', async () => {
+            const schema = parsePrismaAst(EVENT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, EVENT_SCHEMA);
+            const service = files.find((f) => f.path.endsWith('order.service.ts'))!;
+            expect(service.content).toContain("import { eventBus } from '../../utils/event-bus.js'");
+            expect(service.content).toContain("eventBus.emit('Order', 'created'");
+            expect(service.content).toContain("eventBus.emit('Order', 'updated'");
+            expect(service.content).toContain("eventBus.emit('Order', 'deleted'");
+        });
+
+        it('does not generate event-bus when no model has @bcm.event', async () => {
+            const schema = parsePrismaAst(BLOG_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'utils' }, BLOG_SCHEMA);
+            const eventBus = files.find((f) => f.path.includes('event-bus'));
+            expect(eventBus).toBeUndefined();
+        });
+    });
+
+    describe('@bcm.audit directive', () => {
+        const AUDIT_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.audit
+model Invoice {
+  id     String @id @default(cuid())
+  total  Float
+}
+`;
+
+        it('generates audit utility when any model has @bcm.audit', async () => {
+            const schema = parsePrismaAst(AUDIT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'utils' }, AUDIT_SCHEMA);
+            const audit = files.find((f) => f.path.includes('audit'));
+            expect(audit).toBeDefined();
+            expect(audit!.content).toContain('writeAuditLog');
+        });
+
+        it('service calls writeAuditLog after mutations', async () => {
+            const schema = parsePrismaAst(AUDIT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, AUDIT_SCHEMA);
+            const service = files.find((f) => f.path.endsWith('invoice.service.ts'))!;
+            expect(service.content).toContain("import { writeAuditLog } from '../../utils/audit.js'");
+            expect(service.content).toContain("action: 'CREATE'");
+            expect(service.content).toContain("action: 'UPDATE'");
+            expect(service.content).toContain("action: 'DELETE'");
+            expect(service.content).toContain('changedBy');
+        });
+
+        it('controller threads changedBy to service', async () => {
+            const schema = parsePrismaAst(AUDIT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, AUDIT_SCHEMA);
+            const controller = files.find((f) => f.path.endsWith('invoice.controller.ts'))!;
+            expect(controller.content).toContain('getChangedBy');
+            expect(controller.content).toContain('this.getChangedBy(req)');
+            expect(controller.content).toContain('user?.sub');
+        });
+
+        it('appends AuditLog model to cleaned prisma schema', async () => {
+            const schema = parsePrismaAst(AUDIT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'prisma' }, AUDIT_SCHEMA);
+            const prismaSchema = files.find((f) => f.path === 'prisma/schema.prisma')!;
+            expect(prismaSchema.content).toContain('model AuditLog');
+            expect(prismaSchema.content).toContain('recordId');
+            expect(prismaSchema.content).toContain('changedBy');
+        });
+
+        it('service fetches before state on update for audit', async () => {
+            const schema = parsePrismaAst(AUDIT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, AUDIT_SCHEMA);
+            const service = files.find((f) => f.path.endsWith('invoice.service.ts'))!;
+            expect(service.content).toContain('const before = await this.repo.findOne(key)');
+        });
+    });
+
+    describe('@bcm.multitenancy directive', () => {
+        const MULTI_TENANT_AUTH_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id       String @id @default(cuid())
+  /// @bcm.identifier
+  email    String @unique
+  /// @bcm.password
+  password String
+  orgId    String
+}
+
+/// @bcm.multitenancy(field: "orgId")
+/// @bcm.protected
+/// @bcm.cursor(field: "id")
+model Project {
+  id    String @id @default(cuid())
+  orgId String
+  name  String
+}
+`;
+
+        const MULTI_TENANT_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.multitenancy(field: "orgId")
+/// @bcm.protected
+model Project {
+  id    String @id @default(cuid())
+  orgId String
+  name  String
+}
+`;
+
+        it('service accepts tenantId in findMany', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, MULTI_TENANT_SCHEMA);
+            const service = files.find((f) => f.path.endsWith('project.service.ts'))!;
+            expect(service.content).toContain('tenantId: string');
+            expect(service.content).toContain('orgId: tenantId');
+        });
+
+        it('controller extracts tenantId from request', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, MULTI_TENANT_SCHEMA);
+            const controller = files.find((f) => f.path.endsWith('project.controller.ts'))!;
+            expect(controller.content).toContain('getTenantId');
+            expect(controller.content).toContain('user.orgId');
+        });
+
+        it('excludes tenant field from create DTO', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, MULTI_TENANT_SCHEMA);
+            const dto = files.find((f) => f.path.endsWith('project.dto.ts'))!;
+            // orgId should not appear in CreateProjectSchema
+            expect(dto.content).toContain('CreateProjectSchema');
+            // The create schema should have 'name' but not 'orgId'
+            const createBlock = dto.content.split('CreateProjectSchema')[1]?.split('export')[0] ?? '';
+            expect(createBlock).not.toContain('orgId');
+        });
+
+        it('controller injects tenantId into create body', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, MULTI_TENANT_SCHEMA);
+            const controller = files.find((f) => f.path.endsWith('project.controller.ts'))!;
+            expect(controller.content).toContain('orgId: this.getTenantId(req)');
+        });
+
+        it('auth routes include tenant claims in generated JWT payloads', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_AUTH_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'app' }, MULTI_TENANT_AUTH_SCHEMA);
+            const authRoutes = files.find((f) => f.path === 'src/modules/auth/auth.routes.ts')!;
+
+            expect(authRoutes.content).toContain('orgId: user.orgId');
+        });
+
+        it('controller and service scope cursor pagination by tenantId', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_AUTH_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, MULTI_TENANT_AUTH_SCHEMA);
+            const controller = files.find((f) => f.path.endsWith('project.controller.ts'))!;
+            const service = files.find((f) => f.path.endsWith('project.service.ts'))!;
+
+            expect(controller.content).toContain('service.findManyCursor(cursor, pageSize, direction, this.getTenantId(req))');
+            expect(service.content).toContain('tenantId: string');
+            expect(service.content).toContain('orgId: tenantId');
+        });
+
+        it('repository has findOneScoped method', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, MULTI_TENANT_SCHEMA);
+            const repo = files.find((f) => f.path.endsWith('project.repository.ts'))!;
+            expect(repo.content).toContain('findOneScoped');
+            expect(repo.content).toContain('tenantId: string');
+        });
+    });
+
+    describe('upload file cleanup on delete', () => {
+        const UPLOAD_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Attachment {
+  id       String @id @default(cuid())
+  /// @bcm.upload(dest: "attachments")
+  filePath String
+}
+`;
+
+        it('service fetches record and unlinks file on delete', async () => {
+            const schema = parsePrismaAst(UPLOAD_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, UPLOAD_SCHEMA);
+            const service = files.find((f) => f.path.endsWith('attachment.service.ts'))!;
+            expect(service.content).toContain("import('fs/promises')");
+            expect(service.content).toContain('unlink');
+            expect(service.content).toContain('filePath');
         });
     });
 });

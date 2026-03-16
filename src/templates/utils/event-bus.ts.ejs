@@ -1,0 +1,52 @@
+import { EventEmitter } from 'events';
+
+export type ModelEvent =
+  | 'created'
+  | 'updated'
+  | 'deleted';
+
+export interface ModelEventPayload {
+  model: string;
+  action: ModelEvent;
+  data: unknown;
+  timestamp: Date;
+}
+
+class TypedEventBus {
+  private emitter = new EventEmitter();
+
+  /**
+   * Emit a model event.
+   * @param model  Model name (e.g. "User")
+   * @param action Mutation type
+   * @param data   The record data (after mutation)
+   */
+  emit(model: string, action: ModelEvent, data: unknown): void {
+    const payload: ModelEventPayload = {
+      model,
+      action,
+      data,
+      timestamp: new Date(),
+    };
+    this.emitter.emit(`${model}.${action}`, payload);
+    this.emitter.emit('*', payload);
+  }
+
+  /**
+   * Listen for a specific model event.
+   * @param event  Event name (e.g. "User.created") or "*" for all events
+   * @param handler Callback
+   */
+  on(event: string, handler: (payload: ModelEventPayload) => void): void {
+    this.emitter.on(event, handler);
+  }
+
+  /**
+   * Remove a listener.
+   */
+  off(event: string, handler: (payload: ModelEventPayload) => void): void {
+    this.emitter.off(event, handler);
+  }
+}
+
+export const eventBus = new TypedEventBus();

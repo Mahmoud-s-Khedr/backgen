@@ -28,6 +28,7 @@ export function validateSchema(schema: ParsedSchema): ValidationResult {
     checkHiddenRequiredForeignKeys(schema, errors);
     checkReadonlyRequiredFields(schema, errors);
     checkMixedRequiredRelationInputModes(schema, errors);
+    checkCursorConfiguration(schema, errors);
 
     // Parser-level warnings become validation warnings
     for (const w of schema.warnings) {
@@ -51,6 +52,7 @@ export function validateSchemaOrThrow(schema: ParsedSchema): void {
     throwIfErrors(checkHiddenRequiredForeignKeys, schema);
     throwIfErrors(checkReadonlyRequiredFields, schema);
     throwIfErrors(checkMixedRequiredRelationInputModes, schema);
+    throwIfErrors(checkCursorConfiguration, schema);
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +234,28 @@ function checkMixedRequiredRelationInputModes(schema: ParsedSchema, errors: Vali
             message:
                 `Model "${model.name}" mixes required @bcm.nested relations (${nestedNames}) with required non-nested relations (${nonNestedNames}), ` +
                 'which produces incompatible Prisma input shapes. Mark all or none required relations with /// @bcm.nested.',
+        });
+    }
+}
+
+function checkCursorConfiguration(schema: ParsedSchema, errors: ValidationIssue[]): void {
+    for (const model of schema.models) {
+        const cursorField = model.cursorConfig?.field;
+        if (!cursorField) continue;
+
+        const hasSupportedSelector = model.selectors?.some(
+            (selector) => selector.fields.length === 1 && selector.fields[0] === cursorField
+        );
+
+        if (hasSupportedSelector) continue;
+
+        errors.push({
+            severity: 'error',
+            model: model.name,
+            field: cursorField,
+            directive: 'cursor',
+            message:
+                `Model "${model.name}" uses @bcm.cursor(field: "${cursorField}") but "${cursorField}" is not a single-field @id or @unique selector.`,
         });
     }
 }

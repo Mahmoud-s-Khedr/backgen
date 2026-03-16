@@ -7,7 +7,7 @@ import type {
     EnumDefinition,
     DatasourceConfig,
 } from './types.js';
-import { parseDirectives, getFieldDirectives, getFieldUploadConfig } from './directive-parser.js';
+import { parseDirectives, getFieldDirectives, getFieldUploadConfig, getFieldTransformConfig } from './directive-parser.js';
 import type { ModelDirectivesResult } from './directive-parser.js';
 
 /** Attribute node from @mrleebo/prisma-ast (e.g., @id, @unique, @default, @relation) */
@@ -221,6 +221,10 @@ function parseModelBlock(
             ? getFieldUploadConfig(directivesMap, modelName, fieldName)
             : undefined;
 
+        const transformConfig = directives.includes('transform')
+            ? getFieldTransformConfig(directivesMap, modelName, fieldName)
+            : undefined;
+
         fields.push({
             name: fieldName,
             type: fieldType,
@@ -238,6 +242,7 @@ function parseModelBlock(
             defaultValue,
             directives,
             ...(uploadConfig ? { uploadConfig } : {}),
+            ...(transformConfig ? { transformConfig } : {}),
         });
     }
 
@@ -270,6 +275,11 @@ function parseModelBlock(
         passwordField,
         roleField,
         ...(modelResult?.cacheConfig ? { cacheConfig: modelResult.cacheConfig } : {}),
+        ...(modelResult?.rateLimitConfig ? { rateLimitConfig: modelResult.rateLimitConfig } : {}),
+        ...(modelResult?.cursorConfig ? { cursorConfig: modelResult.cursorConfig } : {}),
+        ...(modelDirectives.includes('event') ? { isEvent: true } : {}),
+        ...(modelDirectives.includes('audit') ? { isAudit: true } : {}),
+        ...(modelResult?.multitenancyConfig ? { multitenancyConfig: modelResult.multitenancyConfig } : {}),
     };
 }
 
