@@ -1,5 +1,6 @@
 <% const dbName = h.toSnakeCase(projectName || 'app'); -%>
 <% const needsRedis = hasCache || hasAuth || jobsProvider === 'bullmq'; -%>
+<% const needsJwt = schema.models.some(m => m.isAuthModel || m.directives.includes('protected') || m.directives.includes('auth')); -%>
 <% if (provider === 'sqlite') { -%>
 services:
   app:
@@ -9,7 +10,9 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:./data/<%= dbName %>.db
+<% if (needsJwt) { -%>
       - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}"
+<% } -%>
 <% if (needsRedis) { -%>
       - REDIS_URL=redis://redis:6379
     depends_on:
@@ -28,7 +31,7 @@ services:
 volumes:
   appdata:
 <% } else if (provider === 'mysql') { -%>
-# SECURITY: Set MYSQL_PASSWORD and JWT_SECRET in a .env file
+# SECURITY: Set MYSQL_PASSWORD<% if (needsJwt) { %> and JWT_SECRET<% } %> in a .env file
 # before deploying to production. Do not commit credentials to source control.
 services:
   app:
@@ -38,7 +41,9 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=mysql://${MYSQL_USER:-root}:${MYSQL_PASSWORD:-root}@db:3306/<%= dbName %>
+<% if (needsJwt) { -%>
       - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}"
+<% } -%>
 <% if (needsRedis) { -%>
       - REDIS_URL=redis://redis:6379
 <% } -%>
@@ -75,7 +80,7 @@ services:
 volumes:
   mysqldata:
 <% } else if (provider === 'mongodb') { -%>
-# SECURITY: Set MONGO_PASSWORD and JWT_SECRET in a .env file
+# SECURITY: Set MONGO_PASSWORD<% if (needsJwt) { %> and JWT_SECRET<% } %> in a .env file
 # before deploying to production. Do not commit credentials to source control.
 services:
   app:
@@ -85,7 +90,9 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=mongodb://${MONGO_USER:-mongo}:${MONGO_PASSWORD:-mongo}@db:27017/<%= dbName %>?authSource=admin
+<% if (needsJwt) { -%>
       - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}"
+<% } -%>
 <% if (needsRedis) { -%>
       - REDIS_URL=redis://redis:6379
 <% } -%>
@@ -123,7 +130,7 @@ services:
 volumes:
   mongodata:
 <% } else { -%>
-# SECURITY: Set POSTGRES_USER, POSTGRES_PASSWORD, and JWT_SECRET in a .env file
+# SECURITY: Set POSTGRES_USER, POSTGRES_PASSWORD<% if (needsJwt) { %>, and JWT_SECRET<% } %> in a .env file
 # before deploying to production. Do not commit credentials to source control.
 services:
   app:
@@ -133,7 +140,9 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/<%= dbName %>?schema=public
+<% if (needsJwt) { -%>
       - "JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env (min 32 chars). Run: openssl rand -base64 32}"
+<% } -%>
 <% if (needsRedis) { -%>
       - REDIS_URL=redis://redis:6379
 <% } -%>

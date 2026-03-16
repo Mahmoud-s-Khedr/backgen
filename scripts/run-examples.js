@@ -19,7 +19,7 @@ const outDir = join(root, 'out');
 const logsDir = join(root, 'logs');
 const cli = join(root, 'dist', 'generator', 'cli.js');
 const MAX_BUFFER_BYTES = 1024 * 1024 * 100; // 100MB
-const HEALTH_TIMEOUT_MS = 9_000;
+const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_INTERVAL_MS = 1_000;
 const DOCKER_BASE_PORT = 3_000;
 const FRAMEWORKS = ['express', 'fastify'];
@@ -139,6 +139,14 @@ function formatTimestamp(date) {
 
 function logLine(line = '') {
   appendFileSync(logPath, `${line}\n`, 'utf8');
+}
+
+function formatDuration(ms) {
+  if (ms < 1_000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms % 60_000) / 1_000);
+  return `${m}m${s}s`;
 }
 
 function splitLines(text) {
@@ -406,6 +414,14 @@ function summarizeCommandFailure(commandResult, diagnostics) {
   return lastLine ? normalizeLine(lastLine) : '';
 }
 
+function printDockerLogTail(logsResult) {
+  const logTail = logsResult.stdout.trim().split('\n').slice(-30);
+  if (logTail.length > 0 && logTail[0]) {
+    console.error(`│    ── docker logs (last ${logTail.length} lines) ──`);
+    console.error(logTail.map((l) => `│    ${l}`).join('\n'));
+  }
+}
+
 async function runDockerSmoke(exampleName, framework, outputDir, port, provider, dbPort, redisPort) {
   const projectName = sanitizeProjectName(`${exampleName}_${framework}`);
   const exampleLabel = `${exampleName} [${framework}]`;
@@ -416,6 +432,11 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
   let failureSummary = '';
 
   try {
+    logLine(`\n--- ${exampleLabel} :: docker smoke/up (starting) ---`);
+    logLine(`command: docker compose --project-name ${projectName} up --build -d`);
+    logLine(`cwd: ${outputDir}`);
+    logLine(`env: PORT=${port} DB_PORT=${dbPort} REDIS_PORT=${redisPort}`);
+
     const up = runCommand(
       `docker compose --project-name ${projectName} up --build -d`,
       outputDir,
@@ -426,10 +447,17 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
     if (!up.success) {
       success = false;
       failureSummary = summarizeCommandFailure(up, upDiagnostics);
+      logLine(`[docker up FAILED] exit=${up.status} durationMs=${up.durationMs}`);
+      if (up.stderr.trim()) {
+        logLine(`[docker up stderr]\n${up.stderr.trim()}`);
+      }
+    } else {
+      logLine(`[docker up OK] durationMs=${up.durationMs}`);
     }
 
     if (up.success) {
       const healthUrl = `http://localhost:${port}/health`;
+      logLine(`[health check] polling ${healthUrl} (timeout=${HEALTH_TIMEOUT_MS}ms, interval=${HEALTH_POLL_INTERVAL_MS}ms)`);
       healthResult = await waitForHealth(healthUrl, HEALTH_TIMEOUT_MS, HEALTH_POLL_INTERVAL_MS);
       logLine(`\n--- ${exampleLabel} :: docker smoke/health ---`);
       logLine(`url: ${healthUrl}`);
@@ -453,6 +481,8 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
         const logsDiagnostics = recordDiagnostics(exampleLabel, 'docker smoke/logs', logsResult);
         writeCommandLog(exampleLabel, 'docker smoke/logs', logsResult, logsDiagnostics);
         failureSummary = summarizeCommandFailure(logsResult, logsDiagnostics) || failureSummary;
+
+        printDockerLogTail(logsResult);
       }
     } else {
       const logsResult = runCommand(
@@ -463,9 +493,19 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
       const logsDiagnostics = recordDiagnostics(exampleLabel, 'docker smoke/logs', logsResult);
       writeCommandLog(exampleLabel, 'docker smoke/logs', logsResult, logsDiagnostics);
       failureSummary = summarizeCommandFailure(logsResult, logsDiagnostics) || failureSummary;
+
+      printDockerLogTail(logsResult);
+
+      // Also print docker compose up stderr for build errors
+      if (up.stderr.trim()) {
+        const upStderrTail = up.stderr.trim().split('\n').slice(-20);
+        console.error(`│    ── docker compose up stderr (last ${upStderrTail.length} lines) ──`);
+        console.error(upStderrTail.map((l) => `│    ${l}`).join('\n'));
+      }
     }
 
     if (up.success && success && healthResult?.success) {
+      logLine(`\n[seed] running pnpm run seed inside container...`);
       const seed = runCommand(
         `docker compose --project-name ${projectName} exec -T app pnpm run seed`,
         outputDir,
@@ -476,6 +516,14 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
       if (!seed.success) {
         success = false;
         failureSummary = summarizeCommandFailure(seed, seedDiagnostics) || failureSummary;
+        logLine(`[seed FAILED] exit=${seed.status}`);
+        const seedStderr = seed.stderr.trim().split('\n').slice(-15);
+        if (seedStderr.length > 0 && seedStderr[0]) {
+          console.error(`│    ── seed stderr (last ${seedStderr.length} lines) ──`);
+          console.error(seedStderr.map((l) => `│    ${l}`).join('\n'));
+        }
+      } else {
+        logLine(`[seed OK] durationMs=${seed.durationMs}`);
       }
     }
   } catch (error) {
@@ -512,6 +560,16 @@ const matrixRuns = schemas.length * selectedFrameworks.length;
 let matrixIndex = 0;
 const examplesWithFailures = new Set();
 
+console.log('\n╔══════════════════════════════════════════════════════════╗');
+console.log('║              run-examples.js                             ║');
+console.log('╚══════════════════════════════════════════════════════════╝');
+console.log(`  schemas:    ${schemas.length} (${schemas.map(s => basename(s, '.prisma')).join(', ')})`);
+console.log(`  frameworks: ${selectedFrameworks.join(', ')}`);
+console.log(`  matrix:     ${matrixRuns} total runs`);
+if (jobsArg) console.log(`  jobs:       ${jobsArg}`);
+console.log(`  node:       ${process.version}`);
+console.log(`  log:        ${resolve(logPath)}`);
+
 for (const schema of schemas) {
   const name = basename(schema, '.prisma');
   const schemaPath = join(examplesDir, schema);
@@ -522,8 +580,6 @@ for (const schema of schemas) {
   const directives = detectDirectives(schemaText);
   const hasWs = directives.includes('ws');
 
-  console.log(`    directives: ${directives.length > 0 ? directives.join(', ') : '(none)'}`);
-
   for (const framework of selectedFrameworks) {
     const outputDir = join(outDir, name, framework);
     const matrixLabel = `${name} [${framework}]`;
@@ -531,8 +587,13 @@ for (const schema of schemas) {
     const dbPort = DOCKER_BASE_PORT + 2000 + matrixIndex;
     const redisPort = DOCKER_BASE_PORT + 3000 + matrixIndex;
     matrixIndex += 1;
+    const matrixStartedMs = Date.now();
 
-    console.log(`\n  ${matrixLabel}`);
+    console.log(`\n┌─── [${matrixIndex}/${matrixRuns}] ${matrixLabel} ───`);
+    console.log(`│  provider:   ${provider}`);
+    console.log(`│  directives: ${directives.length > 0 ? directives.join(', ') : '(none)'}`);
+    console.log(`│  ports:      app=${dockerPort} db=${dbPort} redis=${redisPort}`);
+    console.log(`│  output:     ${outputDir}`);
     logLine(`\n==================== EXAMPLE: ${matrixLabel} ====================`);
     logLine(`provider: ${provider}`);
     logLine(`schemaPath: ${schemaPath}`);
@@ -588,7 +649,7 @@ for (const schema of schemas) {
     ];
 
     for (const step of steps) {
-      process.stdout.write(`    ${step.label.padEnd(16)} ... `);
+      process.stdout.write(`│  ${step.label.padEnd(16)} ... `);
 
       if (step.skip) {
         console.log(`skipped (${step.skip})`);
@@ -603,38 +664,59 @@ for (const schema of schemas) {
       writeCommandLog(matrixLabel, step.label, result, diagnostics);
 
       if (result.success) {
-        console.log('ok');
+        const warn = diagnostics.warnings.length > 0 ? ` (${diagnostics.warnings.length} warning(s))` : '';
+        console.log(`ok  (${formatDuration(result.durationMs)})${warn}`);
       } else {
-        console.log('FAILED');
-        const msg = result.stderr.trim() || result.spawnError || `exit code ${result.status}`;
-        if (msg) console.error(msg.split('\n').map((l) => `      ${l}`).join('\n'));
+        console.log(`FAILED  (${formatDuration(result.durationMs)}, exit ${result.status})`);
+        const stderrTail = result.stderr.trim().split('\n').slice(-15);
+        const stdoutTail = result.stdout.trim().split('\n').slice(-10);
+        if (stderrTail.length > 0 && stderrTail[0]) {
+          console.error(`│    ── stderr (last ${stderrTail.length} lines) ──`);
+          console.error(stderrTail.map((l) => `│    ${l}`).join('\n'));
+        }
+        if (stdoutTail.length > 0 && stdoutTail[0]) {
+          console.error(`│    ── stdout (last ${stdoutTail.length} lines) ──`);
+          console.error(stdoutTail.map((l) => `│    ${l}`).join('\n'));
+        }
+        if (result.spawnError) {
+          console.error(`│    spawn error: ${result.spawnError}`);
+        }
         matrixRunFailedSteps++;
         failedStepsCount++;
       }
     }
 
-    process.stdout.write(`    ${'docker smoke'.padEnd(16)} ... `);
+    process.stdout.write(`│  ${'docker smoke'.padEnd(16)} ... `);
+    const dockerStartMs = Date.now();
     const dockerResult = await runDockerSmoke(name, framework, outputDir, dockerPort, provider, dbPort, redisPort);
+    const dockerElapsed = formatDuration(Date.now() - dockerStartMs);
     if (dockerResult.success) {
-      console.log('ok');
+      const healthInfo = dockerResult.healthResult
+        ? ` (health: ${dockerResult.healthResult.attempts} attempt(s), ${dockerResult.healthResult.elapsedMs}ms)`
+        : '';
+      console.log(`ok  (${dockerElapsed})${healthInfo}`);
     } else {
-      console.log('FAILED');
-      const healthErr = dockerResult.healthResult && !dockerResult.healthResult.success
-        ? `health failed: ${dockerResult.healthResult.lastError || 'unknown'}`
-        : 'docker compose up/down failed';
-      console.error(`      ${healthErr}`);
+      console.log(`FAILED  (${dockerElapsed})`);
+      if (dockerResult.healthResult && !dockerResult.healthResult.success) {
+        console.error(`│    health check: ${dockerResult.healthResult.lastError || 'unknown'} (${dockerResult.healthResult.attempts} attempt(s) over ${dockerResult.healthResult.elapsedMs}ms)`);
+      } else {
+        console.error(`│    docker compose up/down failed`);
+      }
       if (dockerResult.failureSummary) {
-        console.error(`      cause: ${dockerResult.failureSummary}`);
+        console.error(`│    cause: ${dockerResult.failureSummary}`);
       }
       matrixRunFailedSteps++;
       failedStepsCount++;
     }
 
+    const matrixElapsed = formatDuration(Date.now() - matrixStartedMs);
     if (matrixRunFailedSteps > 0) {
       matrixFailed++;
       examplesWithFailures.add(name);
+      console.log(`└─── FAILED (${matrixRunFailedSteps} step(s) failed, ${matrixElapsed})`);
     } else {
       matrixPassed++;
+      console.log(`└─── PASSED (${matrixElapsed})`);
     }
   }
 }
@@ -694,11 +776,44 @@ if (errorEntriesActionable.length === 0) {
   }
 }
 
-console.log(`\nframeworks: ${selectedFrameworks.join(', ')}`);
-if (jobsArg) console.log(`jobs: ${jobsArg}`);
-console.log(`directive coverage: ${directiveCoverage.size}/${KNOWN_DIRECTIVES.length}`);
-if (uncovered.length > 0) console.log(`uncovered directives: ${uncovered.join(', ')}`);
-console.log(`${matrixPassed} passed, ${matrixFailed} failed (matrix runs)`);
-console.log(`${examplesWithFailures.size} examples with at least one framework failure`);
-console.log(`Log file: ${resolve(logPath)}`);
-if (matrixFailed > 0) process.exit(1);
+const totalDuration = formatDuration(runEndedAt.getTime() - runStartedAt.getTime());
+
+console.log('\n╔══════════════════════════════════════════════════════════╗');
+console.log('║                       SUMMARY                            ║');
+console.log('╚══════════════════════════════════════════════════════════╝');
+console.log(`  duration:    ${totalDuration}`);
+console.log(`  frameworks:  ${selectedFrameworks.join(', ')}`);
+if (jobsArg) console.log(`  jobs:        ${jobsArg}`);
+console.log(`  coverage:    ${directiveCoverage.size}/${KNOWN_DIRECTIVES.length} directives`);
+if (uncovered.length > 0) console.log(`  uncovered:   ${uncovered.join(', ')}`);
+console.log(`  matrix:      ${matrixPassed} passed, ${matrixFailed} failed (${matrixRuns} total)`);
+console.log(`  failed steps: ${failedStepsCount}`);
+if (examplesWithFailures.size > 0) {
+  console.log(`  failed:      ${[...examplesWithFailures].join(', ')}`);
+}
+if (warningEntriesActionable.length > 0) {
+  console.log(`  warnings:    ${warningEntriesActionable.length} actionable`);
+  for (const w of warningEntriesActionable.slice(0, 10)) {
+    console.log(`    - [${w.example}] [${w.step}] ${w.line}`);
+  }
+  if (warningEntriesActionable.length > 10) {
+    console.log(`    ... and ${warningEntriesActionable.length - 10} more (see log file)`);
+  }
+}
+if (errorEntriesActionable.length > 0) {
+  console.log(`  errors:      ${errorEntriesActionable.length} actionable`);
+  for (const e of errorEntriesActionable.slice(0, 10)) {
+    console.log(`    - [${e.example}] [${e.step}] ${e.line}`);
+  }
+  if (errorEntriesActionable.length > 10) {
+    console.log(`    ... and ${errorEntriesActionable.length - 10} more (see log file)`);
+  }
+}
+console.log(`  log:         ${resolve(logPath)}`);
+
+if (matrixFailed > 0) {
+  console.log(`\n  RESULT: FAILED (${matrixFailed} of ${matrixRuns} matrix runs failed)`);
+  process.exit(1);
+} else {
+  console.log(`\n  RESULT: PASSED (all ${matrixRuns} matrix runs succeeded)`);
+}
