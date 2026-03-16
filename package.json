@@ -10,13 +10,13 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "dev": "npm run build && node dist/generator/cli.js",
+    "dev": "pnpm run build && node dist/generator/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "tsc --noEmit",
     "examples": "node scripts/run-examples.js",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "pnpm run build",
     "portfolio:shots": "node scripts/capture-playground-screenshots.mjs && node scripts/capture-cli-proof.mjs",
     "portfolio:screenshots": "node scripts/capture-playground-screenshots.mjs",
     "portfolio:cli-proof": "node scripts/capture-cli-proof.mjs"

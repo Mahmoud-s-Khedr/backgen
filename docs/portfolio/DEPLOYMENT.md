@@ -14,15 +14,15 @@ The playground server depends on `dist/generator/cli.js` from root build.
 
 ### Build Command
 ```bash
-npm ci
-npm run build
-npm --prefix packages/playground ci
-npm --prefix packages/playground run build
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm install --dir packages/playground --frozen-lockfile
+pnpm --dir packages/playground run build
 ```
 
 ### Start Command
 ```bash
-npm --prefix packages/playground run start
+pnpm --dir packages/playground run start
 ```
 
 ## Environment

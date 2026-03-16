@@ -65,16 +65,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 <% if (provider !== 'mongodb') { -%>
-      - run: npx prisma migrate deploy
+      - run: pnpm exec prisma migrate deploy
 <% } else { -%>
-      - run: npx prisma db push
+      - run: pnpm exec prisma db push
 <% } -%>
-      - run: npm run build
-      - run: npm test
+      - run: pnpm build
+      - run: pnpm test

@@ -47,11 +47,11 @@ Core strategy:
 
 | Claim | Evidence Source |
 |---|---|
-| Root generator test suite passes | `npm test` -> `tests/*` passing summary (root) |
-| Playground test suite passes | `npm --prefix packages/playground run test` |
-| Typed checks pass | `npm run lint` and `npm --prefix packages/playground run typecheck` |
+| Root generator test suite passes | `pnpm test` -> `tests/*` passing summary (root) |
+| Playground test suite passes | `pnpm --dir packages/playground test` |
+| Typed checks pass | `pnpm run lint` and `pnpm --dir packages/playground run typecheck` |
 | CLI JSON mode outputs file content for preview/download | `node dist/generator/cli.js generate --dry-run --json ...` |
-| Example matrix is maintained through script | `scripts/run-examples.js` and `npm run examples` |
+| Example matrix is maintained through script | `scripts/run-examples.js` and `pnpm run examples` |
 | Playground uses CLI path in monolithic service | `packages/playground/server/*` + `packages/playground/src/generator.ts` |
 | Multi-provider support is implemented | Prisma provider-aware generation logic and templates (`src/generator/*`, `src/templates/infra/*`) |
 

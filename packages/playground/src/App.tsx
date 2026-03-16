@@ -336,10 +336,10 @@ export function App() {
                             <div className="next-steps">
                                 <h3>Next steps</h3>
                                 <ol>
-                                    <li><code>npm install</code></li>
+                                    <li><code>pnpm install</code></li>
                                     <li><code>cp .env.example .env</code></li>
-                                    <li><code>npx prisma migrate dev --name init</code></li>
-                                    <li><code>npm run dev</code></li>
+                                    <li><code>pnpm exec prisma migrate dev --name init</code></li>
+                                    <li><code>pnpm dev</code></li>
                                 </ol>
                             </div>
                         )}

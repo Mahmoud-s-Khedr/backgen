@@ -271,8 +271,8 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
 
     console.log(chalk.cyan('\n📋 Next steps:\n'));
     console.log(`  ${chalk.gray('1.')} cd ${chalk.bold(options.output)}`);
-    console.log(`  ${chalk.gray('2.')} npm install`);
-    console.log(`  ${chalk.gray('3.')} npx prisma migrate dev --name init`);
-    console.log(`  ${chalk.gray('4.')} npm run dev`);
+    console.log(`  ${chalk.gray('2.')} pnpm install`);
+    console.log(`  ${chalk.gray('3.')} pnpm exec prisma migrate dev --name init`);
+    console.log(`  ${chalk.gray('4.')} pnpm dev`);
     console.log(chalk.gray(`\n  Swagger docs will be at: http://localhost:3000/api/docs\n`));
 }

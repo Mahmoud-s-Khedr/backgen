@@ -86,5 +86,8 @@ describe('initCommand', () => {
         await runInitInTempDir('demo-log-check');
 
         expect(logs.text()).toContain('bcm generate --schema ./prisma/schema.prisma --output . --force');
+        expect(logs.text()).toContain('pnpm install');
+        expect(logs.text()).toContain('pnpm exec prisma migrate dev --name init');
+        expect(logs.text()).toContain('pnpm dev');
     });
 });

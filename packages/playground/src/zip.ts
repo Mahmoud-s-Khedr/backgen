@@ -27,10 +27,10 @@ Files: ${result.files.length}
 ${warningLines}
 
 ## Next Steps
-1. npm install
+1. pnpm install
 2. cp .env.example .env
-3. npx prisma migrate dev --name init
-4. npm run dev
+3. pnpm exec prisma migrate dev --name init
+4. pnpm dev
 `;
     return {
         path: 'GENERATED_BY_BACKEND_CREATOR.md',

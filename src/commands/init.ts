@@ -134,9 +134,9 @@ dist/
         console.log(
             `  ${chalk.gray('3.')} bcm generate --schema ./prisma/schema.prisma --output . --force`
         );
-        console.log(`  ${chalk.gray('4.')} npm install`);
-        console.log(`  ${chalk.gray('5.')} npx prisma migrate dev --name init`);
-        console.log(`  ${chalk.gray('6.')} npm run dev`);
+        console.log(`  ${chalk.gray('4.')} pnpm install`);
+        console.log(`  ${chalk.gray('5.')} pnpm exec prisma migrate dev --name init`);
+        console.log(`  ${chalk.gray('6.')} pnpm dev`);
         console.log();
     } catch (error) {
         spinner.fail(chalk.red('Failed to create project'));

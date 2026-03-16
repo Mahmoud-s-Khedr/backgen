@@ -15,25 +15,25 @@ A production-ready Express.js REST API with TypeScript, Prisma ORM (<%= provider
 
 \`\`\`bash
 # Install dependencies
-npm install
+pnpm install
 
 # Set up environment
 cp .env.example .env
 # Edit .env with your database URL and JWT secret
 <% if (provider === 'mongodb') { %>
 # Push database schema (MongoDB uses db push instead of migrations)
-npx prisma db push
+pnpm exec prisma db push
 <% } else { %>
 # Run database migrations
-npx prisma migrate dev --name init
+pnpm exec prisma migrate dev --name init
 <% } -%>
 
 # Start development server
-npm run dev
+pnpm dev
 \`\`\`
 
 The server and test runtime auto-load environment variables from `.env` via `dotenv`.
-Keep `.env` present (for example, by copying `.env.example`) before running `npm run dev` or `npm test`.
+Keep `.env` present (for example, by copying `.env.example`) before running `pnpm dev` or `pnpm test`.
 
 ## API Documentation
 
@@ -77,13 +77,13 @@ GET /api/resource?page=1&limit=20&sort=createdAt&order=desc&filter[field]=value&
 
 | Script | Description |
 |--------|-------------|
-| \`npm run dev\` | Start development server with hot reload |
-| \`npm run build\` | Compile TypeScript |
-| \`npm start\` | Start production server |
-| \`npm test\` | Run tests |
-| \`npm run migrate\` | Run Prisma migrations |
-| \`npm run seed\` | Seed the database |
-| \`npm run studio\` | Open Prisma Studio |
+| \`pnpm dev\` | Start development server with hot reload |
+| \`pnpm build\` | Compile TypeScript |
+| \`pnpm start\` | Start production server |
+| \`pnpm test\` | Run tests |
+| \`pnpm migrate\` | Run Prisma migrations |
+| \`pnpm seed\` | Seed the database |
+| \`pnpm studio\` | Open Prisma Studio |
 
 The seed script respects model dependencies, handles custom/composite FK mappings,
 and prints one sample auth login per auth model. Seeded auth passwords default to
@@ -93,13 +93,15 @@ cyclic/self relations fail fast before cleanup.
 ## Docker
 
 \`\`\`bash
-docker-compose up
+docker compose up
 \`\`\`
 
 Docker startup bootstraps the schema automatically before the server starts.
 If Prisma migration directories already exist, the container runs \`prisma migrate deploy\`.
 If no real migration directories exist yet, it falls back to \`prisma db push\`
 so fresh generated projects can still boot in Docker.
+Keep Docker BuildKit enabled so the generated Dockerfile can reuse pnpm and
+node-gyp caches during image builds.
 
 ## Project Structure
 

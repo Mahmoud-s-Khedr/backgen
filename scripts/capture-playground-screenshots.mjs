@@ -50,15 +50,15 @@ async function runPlaywrightScreenshot(args) {
 
 async function main() {
     if (!existsSync(cliPath)) {
-        throw new Error('Missing dist/generator/cli.js. Run `npm run build` first.');
+        throw new Error('Missing dist/generator/cli.js. Run `pnpm run build` first.');
     }
 
-    await runCommand('npm', ['--prefix', 'packages/playground', 'run', 'build']);
+    await runCommand('pnpm', ['--dir', 'packages/playground', 'run', 'build']);
 
     // Ensure browser is installed for deterministic screenshot capture.
     await runPlaywrightScreenshot(['install', 'chromium']);
 
-    const server = spawn('npm', ['--prefix', 'packages/playground', 'run', 'start'], {
+    const server = spawn('pnpm', ['--dir', 'packages/playground', 'run', 'start'], {
         cwd: repoRoot,
         env: { ...process.env, PORT: String(port), NODE_ENV: 'production' },
         stdio: 'inherit',

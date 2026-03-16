@@ -274,7 +274,7 @@ export async function addCommand(modelName: string, options: AddCommandOptions):
     console.log(chalk.yellow('\n⚠  Remember to:'));
     console.log(`  ${chalk.gray('1.')} Update ${chalk.bold('src/app.ts')} to import and register the new routes`);
     console.log(`  ${chalk.gray('2.')} Run ${chalk.bold('bcm generate --only app')} to regenerate app.ts with the new module`);
-    console.log(`  ${chalk.gray('3.')} Run ${chalk.bold('npx prisma migrate dev')} if you added new models to the schema\n`);
+    console.log(`  ${chalk.gray('3.')} Run ${chalk.bold('pnpm exec prisma migrate dev')} if you added new models to the schema\n`);
 }
 
 function emitJson(payload: AddJsonSuccess | AddJsonFailure): void {

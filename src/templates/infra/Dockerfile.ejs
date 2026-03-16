@@ -1,20 +1,26 @@
+# syntax=docker/dockerfile:1.7
 # ---- Build Stage ----
 FROM node:22-alpine AS builder
 RUN apk add --no-cache openssl<%= provider === 'sqlite' ? ' python3 make g++' : '' %>
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-COPY prisma ./prisma/
-RUN <%= provider === 'sqlite' ? 'npm_config_build_from_source=true ' : '' %>pnpm install --frozen-lockfile
 # .dockerignore keeps host artifacts like node_modules and dist out of this copy.
 COPY . .
-RUN npx prisma generate
+RUN --mount=type=cache,id=backgen-pnpm-store,target=/pnpm/store<% if (provider === 'sqlite') { %> \
+    --mount=type=cache,id=backgen-node-gyp,target=/root/.cache/node-gyp<% } %> \
+    <% if (provider === 'sqlite') { %>npm_config_build_from_source=true <% } %>sh -ceu 'if [ -f pnpm-lock.yaml ]; then \
+      pnpm install --frozen-lockfile --prefer-offline --side-effects-cache --store-dir=/pnpm/store; \
+    else \
+      pnpm install --no-frozen-lockfile --prefer-offline --side-effects-cache --store-dir=/pnpm/store; \
+    fi'
+RUN pnpm exec prisma generate
 RUN pnpm run build
 RUN test -f openapi.json || echo '{}' > openapi.json
 
 # ---- Production Stage ----
 FROM node:22-alpine AS runner
 RUN apk add --no-cache openssl<%= provider === 'sqlite' ? ' libstdc++ libgcc' : '' %>
+RUN npm install -g pnpm@10.27.0
 WORKDIR /app
 ENV NODE_ENV=production
 

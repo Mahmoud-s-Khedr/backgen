@@ -1484,8 +1484,14 @@ model User {
             const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
             const dockerfile = files.find(f => f.path === 'Dockerfile')!;
 
+            expect(dockerfile.content).toContain('# syntax=docker/dockerfile:1.7');
             expect(dockerfile.content).toContain('.dockerignore keeps host artifacts like node_modules and dist out of this copy.');
             expect(dockerfile.content).toContain('COPY . .');
+            expect(dockerfile.content).toContain("if [ -f pnpm-lock.yaml ]");
+            expect(dockerfile.content).toContain('pnpm install --frozen-lockfile');
+            expect(dockerfile.content).toContain('pnpm install --no-frozen-lockfile');
+            expect(dockerfile.content).toContain('RUN corepack enable && corepack prepare pnpm@10.27.0 --activate');
+            expect(dockerfile.content).toContain('RUN npm install -g pnpm@10.27.0');
         });
 
         it('generates a Docker entrypoint and uses it as the container start command', async () => {
@@ -1496,6 +1502,7 @@ model User {
             const entrypoint = files.find(f => f.path === 'docker-entrypoint.sh')!;
 
             expect(entrypoint.content).toContain('#!/bin/sh');
+            expect(dockerfile.content).toContain('FROM node:22-alpine AS runner');
             expect(dockerfile.content).toContain('COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh');
             expect(dockerfile.content).toContain('RUN chmod +x /app/docker-entrypoint.sh');
             expect(dockerfile.content).toContain('CMD ["./docker-entrypoint.sh"]');
@@ -1552,6 +1559,11 @@ model User {
             const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
             const ci = files.find(f => f.path === '.github/workflows/ci.yml')!;
 
+            expect(ci.content).toContain('pnpm/action-setup@v4');
+            expect(ci.content).toContain('cache: pnpm');
+            expect(ci.content).toContain('pnpm install --frozen-lockfile');
+            expect(ci.content).toContain('pnpm build');
+            expect(ci.content).toContain('pnpm test');
             expect(ci.content).toContain('file:./test.db');
             expect(ci.content).not.toContain('postgres');
         });
@@ -1562,7 +1574,7 @@ model User {
             const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
             const ci = files.find(f => f.path === '.github/workflows/ci.yml')!;
 
-            expect(ci.content).toContain('prisma db push');
+            expect(ci.content).toContain('pnpm exec prisma db push');
             expect(ci.content).not.toContain('prisma migrate');
         });
 
@@ -1572,11 +1584,15 @@ model User {
             const files = await generateProject(schema, { ...defaultOptions, only: 'infra' }, raw);
             const readme = files.find(f => f.path === 'README.md')!;
 
+            expect(readme.content).toContain('pnpm install');
+            expect(readme.content).toContain('pnpm dev');
+            expect(readme.content).toContain('pnpm test');
             expect(readme.content).toContain('Docker startup bootstraps the schema automatically before the server starts.');
             expect(readme.content).toContain('If Prisma migration directories already exist, the container runs');
             expect(readme.content).toContain('prisma migrate deploy');
             expect(readme.content).toContain('If no real migration directories exist yet, it falls back to');
             expect(readme.content).toContain('prisma db push');
+            expect(readme.content).toContain('Keep Docker BuildKit enabled');
         });
     });
 

@@ -28,23 +28,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
       - uses: pnpm/action-setup@v4
         with:
           version: 10
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
       - name: Install root dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build generator
-        run: npm run build
+        run: pnpm run build
 
       - name: Run examples
-        run: npm run examples
+        run: pnpm run examples
 
       - name: Upload example artifacts
         if: failure()

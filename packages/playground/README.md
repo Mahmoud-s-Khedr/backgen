@@ -21,12 +21,12 @@ The playground is package-specific documentation. Product usage and directive be
 
 ```bash
 # from repo root
-npm ci
-npm run build
+pnpm install --frozen-lockfile
+pnpm run build
 
 cd packages/playground
-npm ci
-npm run dev
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
 The monolithic server runs at `http://localhost:4173`.
@@ -35,12 +35,12 @@ The monolithic server runs at `http://localhost:4173`.
 
 ```bash
 # build the root CLI first
-npm run build
+pnpm run build
 
 cd packages/playground
-npm ci
-npm run build
-npm run start
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm start
 ```
 
 ## API Contract

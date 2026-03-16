@@ -10,7 +10,7 @@ const clientDistDir = resolve(playgroundRoot, 'dist/client');
 const port = Number(process.env.PORT || '4173');
 
 if (!existsSync(cliPath)) {
-    console.error('Missing CLI bundle at dist/generator/cli.js. Run `npm run build` in the repository root first.');
+    console.error('Missing CLI bundle at dist/generator/cli.js. Run `pnpm run build` in the repository root first.');
     process.exit(1);
 }
 

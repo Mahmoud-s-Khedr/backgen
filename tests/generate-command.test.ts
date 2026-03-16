@@ -342,6 +342,28 @@ model User {
         }
     });
 
+    it('prints pnpm-based next steps after successful generation', async () => {
+        const workspace = await createSchemaWorkspace(SIMPLE_SCHEMA, 'backgen-cli-next-steps-');
+        const logs = captureConsole('log');
+
+        try {
+            await generateCommand({
+                schema: workspace.schemaPath,
+                output: workspace.outputPath,
+                dryRun: false,
+                force: true,
+                json: false,
+            });
+
+            const output = logs.text();
+            expect(output).toContain('pnpm install');
+            expect(output).toContain('pnpm exec prisma migrate dev --name init');
+            expect(output).toContain('pnpm dev');
+        } finally {
+            await workspace.cleanup();
+        }
+    });
+
     it('allows --only generation into a non-empty directory when targeted files are identical', async () => {
         const workspace = await createSchemaWorkspace(SIMPLE_SCHEMA, 'backgen-cli-only-identical-');
         const schema = parsePrismaAst(SIMPLE_SCHEMA);

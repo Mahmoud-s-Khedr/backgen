@@ -18,14 +18,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            packages/playground/pnpm-lock.yaml
       - name: Install root dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
       - name: Install playground dependencies
         working-directory: packages/playground
-        run: npm ci
+        run: pnpm install --frozen-lockfile
       - name: Verify templates bundle is deterministic
         working-directory: packages/playground
         run: |
@@ -33,10 +40,10 @@ jobs:
           git diff --exit-code src/generated/templates.ts
       - name: Typecheck
         working-directory: packages/playground
-        run: npm run typecheck
+        run: pnpm run typecheck
       - name: Test
         working-directory: packages/playground
-        run: npm run test
+        run: pnpm test
       - name: Build
         working-directory: packages/playground
-        run: npm run build
+        run: pnpm run build

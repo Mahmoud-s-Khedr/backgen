@@ -14,13 +14,13 @@ Backgen turns a Prisma schema into a structured Express or Fastify codebase with
 
 - Generates CRUD modules from Prisma models, including selector-aware item routes for `@id`, `@@id`, `@unique`, and `@@unique`.
 - Uses schema directives to control auth, RBAC, soft delete, caching, uploads, searchable fields, and nested relation inputs.
-- Produces route tests that mock Prisma delegates, so generated `npm test` does not require a database.
+- Produces route tests that mock Prisma delegates, so generated `pnpm test` does not require a database.
 - Ships a CLI-backed playground package that uses the same generation pipeline as the published CLI.
 
 ## Quick Start
 
 ```bash
-npm install -g prisma-backgen
+pnpm add -g prisma-backgen
 
 bcm init my-api
 cd my-api
@@ -29,10 +29,10 @@ cd my-api
 bcm validate --schema ./prisma/schema.prisma
 bcm generate --schema ./prisma/schema.prisma --output . --force
 
-npm install
+pnpm install
 cp .env.example .env
-npx prisma migrate dev --name init
-npm run dev
+pnpm exec prisma migrate dev --name init
+pnpm dev
 ```
 
 Use `--framework fastify` to target Fastify instead of the default Express output.
@@ -142,11 +142,11 @@ package.json
 The local playground is a separate package that shells out to the real CLI in `--dry-run --json` mode.
 
 ```bash
-npm ci
-npm run build
+pnpm install --frozen-lockfile
+pnpm run build
 cd packages/playground
-npm ci
-npm run dev
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
 It serves the monolithic playground at `http://localhost:4173`.

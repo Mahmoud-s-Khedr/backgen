@@ -6,11 +6,11 @@ Generate a REST API backend from a Prisma schema with the `bcm` CLI.
 
 ```bash
 # Global install
-npm install -g prisma-backgen
+pnpm add -g prisma-backgen
 bcm --version
 
 # One-off generation without installing globally
-npx prisma-backgen generate --schema ./prisma/schema.prisma --output ./backend
+pnpm dlx prisma-backgen generate --schema ./prisma/schema.prisma --output ./backend
 ```
 
 Node.js `>=18` is required.
@@ -31,13 +31,13 @@ bcm validate --schema ./prisma/schema.prisma
 bcm generate --schema ./prisma/schema.prisma --output . --force
 
 # 5. Install generated dependencies and run
-npm install
+pnpm install
 cp .env.example .env
-npx prisma migrate dev --name init
-npm run dev
+pnpm exec prisma migrate dev --name init
+pnpm dev
 ```
 
-For MongoDB, use `npx prisma db push` instead of `prisma migrate dev`.
+For MongoDB, use `pnpm exec prisma db push` instead of `prisma migrate dev`.
 
 ## CLI Reference
 
@@ -300,15 +300,15 @@ vitest.config.ts
 
 Generated package scripts:
 
-- `npm run dev`
-- `npm run build`
-- `npm start`
-- `npm test`
-- `npm run test:watch`
-- `npm run migrate`
-- `npm run seed`
-- `npm run studio`
-- `npm run generate`
+- `pnpm dev`
+- `pnpm build`
+- `pnpm start`
+- `pnpm test`
+- `pnpm test:watch`
+- `pnpm migrate`
+- `pnpm seed`
+- `pnpm studio`
+- `pnpm generate`
 
 See [Generated Code Walkthrough](generated-code.md) for file responsibilities.
 

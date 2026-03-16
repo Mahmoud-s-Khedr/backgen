@@ -432,7 +432,7 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
 
     if (up.success && success && healthResult?.success) {
       const seed = runCommand(
-        `docker compose --project-name ${projectName} exec -T app npm run seed`,
+        `docker compose --project-name ${projectName} exec -T app pnpm run seed`,
         outputDir,
         { env }
       );
@@ -525,22 +525,20 @@ for (const schema of schemas) {
       },
       {
         label: 'prisma generate',
-        run: () => runCommand('npx prisma generate', outputDir),
+        run: () => runCommand('pnpm exec prisma generate', outputDir),
       },
       {
         label: 'prisma sync',
-        skip: provider !== 'sqlite'
-          ? 'non-sqlite schema sync handled by container bootstrap'
-          : '',
-        run: () => runCommand('npx prisma db push', outputDir),
+        skip: 'schema sync handled by container bootstrap',
+        run: () => runCommand('pnpm exec prisma db push', outputDir),
       },
       {
-        label: 'npm run build',
-        run: () => runCommand('npm run build', outputDir),
+        label: 'pnpm build',
+        run: () => runCommand('pnpm build', outputDir),
       },
       {
-        label: 'npm test',
-        run: () => runCommand('npm test', outputDir),
+        label: 'pnpm test',
+        run: () => runCommand('pnpm test', outputDir),
       },
     ];
 
