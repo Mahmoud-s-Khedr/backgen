@@ -116,7 +116,7 @@ const { app } = await import('../../app.js');
 
 <% if (isProtected) { -%>
 const authToken = jwt.sign(
-  { id: 'test-user-id', role: '<%= authRoles.length > 0 ? authRoles[0] : "USER" %>' },
+  { id: 'test-user-id', role: '<%= authRoles.length > 0 ? authRoles[0] : "USER" %>'<% if (multitenancyConfig) { %>, <%= multitenancyConfig.field %>: 'test-tenant-id'<% } %> },
   env.JWT_SECRET
 );
 <% } -%>
