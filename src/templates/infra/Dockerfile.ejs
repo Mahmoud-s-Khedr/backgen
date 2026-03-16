@@ -8,7 +8,7 @@ WORKDIR /app
 COPY . .
 RUN --mount=type=cache,id=backgen-pnpm-store,target=/pnpm/store<% if (provider === 'sqlite') { %> \
     --mount=type=cache,id=backgen-node-gyp,target=/root/.cache/node-gyp<% } %> \
-    <% if (provider === 'sqlite') { %>npm_config_build_from_source=true <% } %>sh -ceu 'if [ -f pnpm-lock.yaml ]; then \
+    sh -ceu 'if [ -f pnpm-lock.yaml ]; then \
       pnpm install --frozen-lockfile --prefer-offline --side-effects-cache --store-dir=/pnpm/store; \
     else \
       pnpm install --no-frozen-lockfile --prefer-offline --side-effects-cache --store-dir=/pnpm/store; \

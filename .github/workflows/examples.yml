@@ -47,12 +47,18 @@ jobs:
       - name: Run examples
         run: pnpm run examples
 
-      - name: Upload example artifacts
+      - name: Upload example logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: examples-logs
+          path: logs/**
+          if-no-files-found: ignore
+
+      - name: Upload example outputs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: examples-debug
-          path: |
-            logs/**
-            out/**
+          path: out/**
           if-no-files-found: ignore

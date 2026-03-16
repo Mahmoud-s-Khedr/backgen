@@ -422,6 +422,17 @@ function printDockerLogTail(logsResult) {
   }
 }
 
+function collectDockerLogs(exampleLabel, projectName, outputDir, env) {
+  const logsResult = runCommand(
+    `docker compose --project-name ${projectName} logs --no-color --tail 200`,
+    outputDir,
+    { env }
+  );
+  const logsDiagnostics = recordDiagnostics(exampleLabel, 'docker smoke/logs', logsResult);
+  writeCommandLog(exampleLabel, 'docker smoke/logs', logsResult, logsDiagnostics);
+  return { logsResult, logsDiagnostics };
+}
+
 async function runDockerSmoke(exampleName, framework, outputDir, port, provider, dbPort, redisPort) {
   const projectName = sanitizeProjectName(`${exampleName}_${framework}`);
   const exampleLabel = `${exampleName} [${framework}]`;
@@ -430,6 +441,9 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
   let success = true;
   let healthResult = null;
   let failureSummary = '';
+  let failedPhase = '';
+  let failedCommand = '';
+  let failedStatus = null;
 
   try {
     logLine(`\n--- ${exampleLabel} :: docker smoke/up (starting) ---`);
@@ -447,6 +461,9 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
     if (!up.success) {
       success = false;
       failureSummary = summarizeCommandFailure(up, upDiagnostics);
+      failedPhase = 'up';
+      failedCommand = up.command;
+      failedStatus = up.status;
       logLine(`[docker up FAILED] exit=${up.status} durationMs=${up.durationMs}`);
       if (up.stderr.trim()) {
         logLine(`[docker up stderr]\n${up.stderr.trim()}`);
@@ -472,26 +489,17 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
         addErrorEntry(exampleLabel, 'docker smoke/health', errLine);
         logLine(`[health error]\n${errLine}`);
         success = false;
+        failedPhase = 'health';
+        failedCommand = `GET ${healthUrl}`;
+        failedStatus = null;
 
-        const logsResult = runCommand(
-          `docker compose --project-name ${projectName} logs --no-color --tail 200`,
-          outputDir,
-          { env }
-        );
-        const logsDiagnostics = recordDiagnostics(exampleLabel, 'docker smoke/logs', logsResult);
-        writeCommandLog(exampleLabel, 'docker smoke/logs', logsResult, logsDiagnostics);
+        const { logsResult, logsDiagnostics } = collectDockerLogs(exampleLabel, projectName, outputDir, env);
         failureSummary = summarizeCommandFailure(logsResult, logsDiagnostics) || failureSummary;
 
         printDockerLogTail(logsResult);
       }
     } else {
-      const logsResult = runCommand(
-        `docker compose --project-name ${projectName} logs --no-color --tail 200`,
-        outputDir,
-        { env }
-      );
-      const logsDiagnostics = recordDiagnostics(exampleLabel, 'docker smoke/logs', logsResult);
-      writeCommandLog(exampleLabel, 'docker smoke/logs', logsResult, logsDiagnostics);
+      const { logsResult, logsDiagnostics } = collectDockerLogs(exampleLabel, projectName, outputDir, env);
       failureSummary = summarizeCommandFailure(logsResult, logsDiagnostics) || failureSummary;
 
       printDockerLogTail(logsResult);
@@ -516,12 +524,19 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
       if (!seed.success) {
         success = false;
         failureSummary = summarizeCommandFailure(seed, seedDiagnostics) || failureSummary;
+        failedPhase = 'seed';
+        failedCommand = seed.command;
+        failedStatus = seed.status;
         logLine(`[seed FAILED] exit=${seed.status}`);
         const seedStderr = seed.stderr.trim().split('\n').slice(-15);
         if (seedStderr.length > 0 && seedStderr[0]) {
           console.error(`│    ── seed stderr (last ${seedStderr.length} lines) ──`);
           console.error(seedStderr.map((l) => `│    ${l}`).join('\n'));
         }
+
+        const { logsResult, logsDiagnostics } = collectDockerLogs(exampleLabel, projectName, outputDir, env);
+        failureSummary = summarizeCommandFailure(logsResult, logsDiagnostics) || failureSummary;
+        printDockerLogTail(logsResult);
       } else {
         logLine(`[seed OK] durationMs=${seed.durationMs}`);
       }
@@ -533,6 +548,9 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
     logLine(`\n--- ${exampleLabel} :: docker smoke/unhandled ---`);
     logLine(msg);
     failureSummary = normalizeLine(msg);
+    failedPhase = 'unhandled';
+    failedCommand = 'runDockerSmoke';
+    failedStatus = null;
   } finally {
     const down = runCommand(
       `docker compose --project-name ${projectName} down -v --remove-orphans`,
@@ -543,6 +561,10 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
     writeCommandLog(exampleLabel, 'docker smoke/down', down, downDiagnostics);
     if (!down.success) {
       success = false;
+      failureSummary = summarizeCommandFailure(down, downDiagnostics) || failureSummary;
+      failedPhase = failedPhase || 'down';
+      failedCommand = failedCommand || down.command;
+      failedStatus = failedStatus ?? down.status;
     }
   }
 
@@ -550,7 +572,15 @@ async function runDockerSmoke(exampleName, framework, outputDir, port, provider,
     success = false;
   }
 
-  return { success, healthResult, failureSummary };
+  return {
+    success,
+    healthResult,
+    failureSummary,
+    failedPhase,
+    failedCommand,
+    failedStatus,
+    logPath: resolve(logPath),
+  };
 }
 
 let matrixPassed = 0;
@@ -700,11 +730,19 @@ for (const schema of schemas) {
       if (dockerResult.healthResult && !dockerResult.healthResult.success) {
         console.error(`│    health check: ${dockerResult.healthResult.lastError || 'unknown'} (${dockerResult.healthResult.attempts} attempt(s) over ${dockerResult.healthResult.elapsedMs}ms)`);
       } else {
-        console.error(`│    docker compose up/down failed`);
+        console.error(`│    docker smoke command failed`);
       }
+      if (dockerResult.failedPhase) {
+        console.error(`│    phase: ${dockerResult.failedPhase}`);
+      }
+      if (dockerResult.failedCommand) {
+        console.error(`│    command: ${dockerResult.failedCommand}`);
+      }
+      console.error(`│    exit: ${dockerResult.failedStatus ?? 'n/a'}`);
       if (dockerResult.failureSummary) {
         console.error(`│    cause: ${dockerResult.failureSummary}`);
       }
+      console.error(`│    log: ${dockerResult.logPath}`);
       matrixRunFailedSteps++;
       failedStepsCount++;
     }

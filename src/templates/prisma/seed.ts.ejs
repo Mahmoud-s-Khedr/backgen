@@ -103,6 +103,9 @@ type PrismaDelegate = {
 const MODEL_CONFIGS: SeedModelConfig[] = <%- JSON.stringify(seedModelConfigs, null, 2) %>;
 const MODEL_CONFIG_BY_NAME = new Map(MODEL_CONFIGS.map((model) => [model.name, model]));
 const UNSUPPORTED_REQUIRED_RELATIONS: string[] = <%- JSON.stringify(unsupportedRequiredRelations, null, 2) %>;
+let seedPhase: 'cleanup' | 'prime-parent-rows' | 'create-records' | null = null;
+let seedModelName: string | null = null;
+let seedRecordIndex: number | null = null;
 
 /**
  * Database Seed Script
@@ -368,6 +371,9 @@ async function main() {
   console.log(`Seeding database (${SEED_COUNT} records per model)...`);
 
   for (const model of [...MODEL_CONFIGS].reverse()) {
+    seedPhase = 'cleanup';
+    seedModelName = model.name;
+    seedRecordIndex = null;
     await getDelegate(model.clientKey).deleteMany();
   }
 
@@ -375,9 +381,15 @@ async function main() {
   const uniqueRegistryByModel = getUniqueRegistry();
 
   for (const model of MODEL_CONFIGS) {
+    seedPhase = 'prime-parent-rows';
+    seedModelName = model.name;
+    seedRecordIndex = null;
     await primeParentRows(model, parentRows);
 
     for (let i = 0; i < SEED_COUNT; i++) {
+      seedPhase = 'create-records';
+      seedModelName = model.name;
+      seedRecordIndex = i;
       await createRecordWithRetries(
         model,
         i,
@@ -396,6 +408,10 @@ async function main() {
 main()
   .catch((error) => {
     console.error('Seeding failed:', error);
+    if (seedPhase || seedModelName) {
+      const recordLabel = seedRecordIndex === null ? 'n/a' : `${seedRecordIndex + 1}/${SEED_COUNT}`;
+      console.error(`Seed context: phase=${seedPhase ?? 'unknown'}, model=${seedModelName ?? 'unknown'}, record=${recordLabel}`);
+    }
     process.exit(1);
   })
   .finally(async () => {

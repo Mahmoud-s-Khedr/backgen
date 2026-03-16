@@ -1687,6 +1687,7 @@ model User {
             expect(dockerfile.content).toContain('pnpm install --no-frozen-lockfile');
             expect(dockerfile.content).toContain('RUN corepack enable && corepack prepare pnpm@10.27.0 --activate');
             expect(dockerfile.content).toContain('RUN npm install -g pnpm@10.27.0');
+            expect(dockerfile.content).not.toContain('npm_config_build_from_source=true');
         });
 
         it('generates a Docker entrypoint and uses it as the container start command', async () => {
@@ -1710,7 +1711,9 @@ model User {
             const entrypoint = files.find(f => f.path === 'docker-entrypoint.sh')!;
 
             expect(entrypoint.content).toContain('has_prisma_migrations()');
+            expect(entrypoint.content).toContain('run_bootstrap_command()');
             expect(entrypoint.content).toContain('Bootstrapping database schema with prisma migrate deploy...');
+            expect(entrypoint.content).toContain('Database bootstrap failed (exit $status): $*');
             expect(entrypoint.content).toContain('npx prisma migrate deploy');
             expect(entrypoint.content).toContain('No Prisma migrations detected; bootstrapping schema with prisma db push...');
             expect(entrypoint.content).toContain('npx prisma db push');
@@ -2309,6 +2312,9 @@ model Post {
             expect(seed.content).toContain("const SOURCE_DATABASE_MODULE = '../src/config/database.ts';");
             expect(seed.content).toContain("const DIST_DATABASE_MODULE = '../dist/config/database.js';");
             expect(seed.content).toContain('async function loadPrisma(): Promise<SeedPrismaClient> {');
+            expect(seed.content).toContain("let seedPhase: 'cleanup' | 'prime-parent-rows' | 'create-records' | null = null;");
+            expect(seed.content).toContain('let seedModelName: string | null = null;');
+            expect(seed.content).toContain('let seedRecordIndex: number | null = null;');
             expect(seed.content).not.toContain('new PrismaClient()');
             expect(seed.content).not.toContain('Record<string, string[]>');
         });
@@ -2441,6 +2447,7 @@ model User {
             expect(seed.content).toContain('return bcrypt.hash(AUTH_SEED_PASSWORD, 12);');
             expect(seed.content).toContain('"sampleIdentifier": "seed-user-1@example.com"');
             expect(seed.content).toContain('Sample ${model.name} credentials -> ${model.auth.identifierField}: ${model.auth.sampleIdentifier}, password: ${AUTH_SEED_PASSWORD}');
+            expect(seed.content).toContain('Seed context: phase=${seedPhase ?? \'unknown\'}, model=${seedModelName ?? \'unknown\'}, record=${recordLabel}');
             expect(seed.content).toContain('"isAuthIdentifier": true');
             expect(seed.content).toContain('"isAuthPassword": true');
         });
