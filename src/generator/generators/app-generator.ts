@@ -4,7 +4,7 @@ import { renderTemplate } from '../template-engine.js';
 /**
  * Generate app.ts, server.ts, and optionally auth routes.
  */
-export function generateAppFiles(schema: ParsedSchema, framework: 'express' | 'fastify' = 'express'): GeneratedFile[] {
+export function generateAppFiles(schema: ParsedSchema, framework: 'express' | 'fastify' = 'express', jobsProvider?: 'bullmq' | 'pg-boss', wsEnabled?: boolean): GeneratedFile[] {
     const authModel = schema.models.find(m => m.isAuthModel);
     const hasAuthRoutes = !!authModel && !!authModel.identifierField && !!authModel.passwordField;
     const isFastify = framework === 'fastify';
@@ -38,6 +38,8 @@ export function generateAppFiles(schema: ParsedSchema, framework: 'express' | 'f
         passwordField: authModel?.passwordField,
         roleField: authModel?.roleField,
         framework,
+        jobsProvider: jobsProvider ?? null,
+        wsEnabled: wsEnabled ?? false,
     };
 
     const files: GeneratedFile[] = [

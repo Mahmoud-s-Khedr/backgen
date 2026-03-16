@@ -1,0 +1,352 @@
+<%
+function sampleValue(field) {
+  if (field.type === 'String') return `'test-${field.name}'`;
+  if (field.type === 'Int') return '1';
+  if (field.type === 'Float' || field.type === 'Decimal') return '1.5';
+  if (field.type === 'Boolean') return 'true';
+  if (field.type === 'DateTime') return "new Date('2024-01-01T00:00:00.000Z')";
+  if (field.type === 'BigInt') return '1n';
+  if (field.isEnum) {
+    const enumDef = enums.find(e => e.name === field.type);
+    if (enumDef && enumDef.values.length > 0) return `'${enumDef.values[0]}'`;
+  }
+  return `'test-${field.name}'`;
+}
+
+function selectorSampleValue(fieldMeta) {
+  if (fieldMeta.filterType === 'number') return '1';
+  if (fieldMeta.filterType === 'bigint') return '1n';
+  if (fieldMeta.filterType === 'boolean') return 'true';
+  if (fieldMeta.filterType === 'datetime') return "new Date('2024-01-01T00:00:00.000Z')";
+  return `'test-${fieldMeta.name}'`;
+}
+
+const modelCamel = h.toCamelCase(model.name);
+-%>
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+type PrismaDelegateMock = {
+  findMany: ReturnType<typeof vi.fn>;
+  count: ReturnType<typeof vi.fn>;
+  findUnique: ReturnType<typeof vi.fn>;
+  findFirst: ReturnType<typeof vi.fn>;
+  create: ReturnType<typeof vi.fn>;
+  update: ReturnType<typeof vi.fn>;
+  updateMany: ReturnType<typeof vi.fn>;
+  delete: ReturnType<typeof vi.fn>;
+};
+
+function createDelegateMock(): PrismaDelegateMock {
+  return {
+    findMany: vi.fn(),
+    count: vi.fn(),
+    findUnique: vi.fn(),
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+    delete: vi.fn(),
+  };
+}
+
+const prismaMock: Record<string, PrismaDelegateMock> = {
+  <%= modelCamel %>: createDelegateMock(),
+};
+
+vi.mock('../../config/database.js', () => ({
+  prisma: prismaMock,
+}));
+
+const { <%= model.name %>Repository } = await import('./<%= h.toCamelCase(model.name) %>.repository.js');
+
+const delegate = prismaMock.<%= modelCamel %>;
+
+describe('<%= model.name %>Repository', () => {
+  let repo: InstanceType<typeof <%= model.name %>Repository>;
+
+  beforeEach(() => {
+    repo = new <%= model.name %>Repository();
+    vi.clearAllMocks();
+  });
+
+<% if (itemSelector) { -%>
+  describe('toWhereUnique', () => {
+<% if (itemSelector.isComposite) { -%>
+    it('builds composite where clause from key', () => {
+      const key = { <%= itemSelectorFieldMeta.map(f => `${f.name}: ${selectorSampleValue(f)}`).join(', ') %> };
+      const where = repo.toWhereUnique(key);
+      expect(where).toEqual({
+        <%= itemSelector.prismaWhereKey %>: {
+<% for (const f of itemSelectorFieldMeta) { -%>
+          <%= f.name %>: key.<%= f.name %>,
+<% } -%>
+        },
+      });
+    });
+<% } else { -%>
+    it('builds where clause from key', () => {
+      const key = { <%= itemSelectorFieldMeta[0].name %>: <%= selectorSampleValue(itemSelectorFieldMeta[0]) %> };
+      const where = repo.toWhereUnique(key);
+      expect(where).toEqual({ <%= itemSelector.fields[0] %>: key.<%= itemSelector.fields[0] %> });
+    });
+<% } -%>
+  });
+
+  describe('keyDescription', () => {
+    it('returns a human-readable key description', () => {
+      const key = { <%= itemSelectorFieldMeta.map(f => `${f.name}: ${selectorSampleValue(f)}`).join(', ') %> };
+      const desc = repo.keyDescription(key);
+      expect(typeof desc).toBe('string');
+<% for (const f of itemSelectorFieldMeta) { -%>
+      expect(desc).toContain('<%= f.name %>');
+<% } -%>
+    });
+  });
+
+<% } -%>
+<% if (includeRelations.length > 0) { -%>
+  describe('toInclude', () => {
+    it('returns undefined when no include provided', () => {
+      expect(repo.toInclude(undefined)).toBeUndefined();
+    });
+
+    it('normalizes valid include fields', () => {
+      const include = { <%= includeRelations[0].name %>: true };
+      const result = repo.toInclude(include);
+      expect(result).toEqual({ <%= includeRelations[0].name %>: true });
+    });
+
+    it('ignores unknown fields', () => {
+      const include = { nonExistent: true };
+      const result = repo.toInclude(include as Record<string, boolean>);
+      expect(result).toBeUndefined();
+    });
+  });
+
+<% } -%>
+  describe('findMany', () => {
+    it('returns data and total count', async () => {
+      const mockItems = [{ id: '1' }, { id: '2' }];
+      delegate.findMany.mockResolvedValue(mockItems);
+      delegate.count.mockResolvedValue(2);
+
+      const options = { where: {}, orderBy: {}, skip: 0, take: 20 };
+      const result = await repo.findMany(options);
+
+      expect(result).toEqual({ data: mockItems, total: 2 });
+      expect(delegate.findMany).toHaveBeenCalledOnce();
+      expect(delegate.count).toHaveBeenCalledOnce();
+    });
+
+<% if (isSoftDelete) { -%>
+    it('adds deletedAt: null filter for soft-delete', async () => {
+      delegate.findMany.mockResolvedValue([]);
+      delegate.count.mockResolvedValue(0);
+
+      const options = { where: {}, orderBy: {}, skip: 0, take: 10 };
+      await repo.findMany(options);
+
+      expect(delegate.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ deletedAt: null }) }),
+      );
+      expect(delegate.count).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ deletedAt: null }) }),
+      );
+    });
+<% } -%>
+  });
+
+<% if (itemSelector) { -%>
+  describe('findOne', () => {
+    const key = { <%= itemSelectorFieldMeta.map(f => `${f.name}: ${selectorSampleValue(f)}`).join(', ') %> };
+
+    it('returns the found record', async () => {
+      const mockRecord = { id: '1', ...key };
+<% if (isSoftDelete) { -%>
+      delegate.findFirst.mockResolvedValue(mockRecord);
+<% } else { -%>
+      delegate.findUnique.mockResolvedValue(mockRecord);
+<% } -%>
+
+      const result = await repo.findOne(key);
+
+      expect(result).toEqual(mockRecord);
+<% if (isSoftDelete) { -%>
+      expect(delegate.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ deletedAt: null }) }),
+      );
+<% } else { -%>
+      expect(delegate.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: repo.toWhereUnique(key) }),
+      );
+<% } -%>
+    });
+
+    it('returns null when record not found', async () => {
+<% if (isSoftDelete) { -%>
+      delegate.findFirst.mockResolvedValue(null);
+<% } else { -%>
+      delegate.findUnique.mockResolvedValue(null);
+<% } -%>
+
+      const result = await repo.findOne(key);
+      expect(result).toBeNull();
+    });
+  });
+
+<% } -%>
+  describe('create', () => {
+    it('creates and returns a new record', async () => {
+      const data = { <%= createFields.slice(0, 3).map(f => `${f.name}: ${sampleValue(f)}`).join(', ') %> };
+      const mockCreated = { id: '1', ...data };
+      delegate.create.mockResolvedValue(mockCreated);
+
+      const result = await repo.create(data);
+
+      expect(result).toEqual(mockCreated);
+      expect(delegate.create).toHaveBeenCalledOnce();
+    });
+  });
+
+<% if (itemSelector) { -%>
+  describe('update', () => {
+    const key = { <%= itemSelectorFieldMeta.map(f => `${f.name}: ${selectorSampleValue(f)}`).join(', ') %> };
+
+    it('updates and returns the record', async () => {
+      const data = { <%= createFields.length > 0 ? `${createFields[0].name}: ${sampleValue(createFields[0])}` : '' %> };
+<% if (isSoftDelete) { -%>
+      delegate.updateMany.mockResolvedValue({ count: 1 });
+      delegate.findFirst.mockResolvedValue({ id: '1', ...key, ...data });
+<% } else { -%>
+      delegate.update.mockResolvedValue({ id: '1', ...key, ...data });
+<% } -%>
+
+      const result = await repo.update(key, data);
+
+      expect(result).toBeDefined();
+<% if (isSoftDelete) { -%>
+      expect(delegate.updateMany).toHaveBeenCalledOnce();
+<% } else { -%>
+      expect(delegate.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: repo.toWhereUnique(key) }),
+      );
+<% } -%>
+    });
+
+    it('throws ProblemDetail with status 404 on P2025 error', async () => {
+      const prismaError = Object.assign(new Error('Record not found'), { code: 'P2025' });
+<% if (isSoftDelete) { -%>
+      delegate.updateMany.mockResolvedValue({ count: 0 });
+<% } else { -%>
+      delegate.update.mockRejectedValue(prismaError);
+<% } -%>
+
+      await expect(repo.update(key, {})).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('delete', () => {
+    const key = { <%= itemSelectorFieldMeta.map(f => `${f.name}: ${selectorSampleValue(f)}`).join(', ') %> };
+
+    it('deletes the record', async () => {
+<% if (isSoftDelete) { -%>
+      delegate.updateMany.mockResolvedValue({ count: 1 });
+<% } else { -%>
+      delegate.delete.mockResolvedValue({ id: '1' });
+<% } -%>
+
+      await expect(repo.delete(key)).resolves.toBeUndefined();
+<% if (isSoftDelete) { -%>
+      expect(delegate.updateMany).toHaveBeenCalledOnce();
+<% } else { -%>
+      expect(delegate.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ where: repo.toWhereUnique(key) }),
+      );
+<% } -%>
+    });
+
+    it('throws ProblemDetail with status 404 on P2025 error', async () => {
+      const prismaError = Object.assign(new Error('Record not found'), { code: 'P2025' });
+<% if (isSoftDelete) { -%>
+      delegate.updateMany.mockResolvedValue({ count: 0 });
+<% } else { -%>
+      delegate.delete.mockRejectedValue(prismaError);
+<% } -%>
+
+      await expect(repo.delete(key)).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+<% } -%>
+<% if (cursorConfig) { -%>
+  describe('findManyCursor', () => {
+    it('returns data, hasMore, and nextCursor', async () => {
+      const mockItems = [
+        { <%= cursorConfig.field %>: 'cursor-1' },
+        { <%= cursorConfig.field %>: 'cursor-2' },
+      ];
+      delegate.findMany.mockResolvedValue(mockItems);
+
+      const result = await repo.findManyCursor(null, 10);
+
+      expect(result.data).toEqual(mockItems);
+      expect(result.hasMore).toBe(false);
+      expect(delegate.findMany).toHaveBeenCalledOnce();
+    });
+
+    it('detects hasMore when results exceed pageSize', async () => {
+      const mockItems = Array.from({ length: 3 }, (_, i) => ({
+        <%= cursorConfig.field %>: `cursor-${i}`,
+      }));
+      delegate.findMany.mockResolvedValue(mockItems);
+
+      const result = await repo.findManyCursor(null, 2);
+
+      expect(result.hasMore).toBe(true);
+      expect(result.data).toHaveLength(2);
+    });
+
+    it('passes cursor and skip when cursor is provided', async () => {
+      delegate.findMany.mockResolvedValue([]);
+
+      await repo.findManyCursor('some-cursor', 10);
+
+      expect(delegate.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cursor: { <%= cursorConfig.field %>: 'some-cursor' },
+          skip: 1,
+        }),
+      );
+    });
+  });
+
+<% } -%>
+<% if (multitenancyConfig && itemSelector) { -%>
+  describe('findOneScoped', () => {
+    const key = { <%= itemSelectorFieldMeta.map(f => `${f.name}: ${selectorSampleValue(f)}`).join(', ') %> };
+    const tenantId = 'tenant-1';
+
+    it('finds a record scoped to tenant', async () => {
+      const mockRecord = { id: '1', ...key, <%= multitenancyConfig.field %>: tenantId };
+      delegate.findFirst.mockResolvedValue(mockRecord);
+
+      const result = await repo.findOneScoped(key, tenantId);
+
+      expect(result).toEqual(mockRecord);
+      expect(delegate.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ <%= multitenancyConfig.field %>: tenantId }),
+        }),
+      );
+    });
+
+    it('returns null when record not found in tenant scope', async () => {
+      delegate.findFirst.mockResolvedValue(null);
+
+      const result = await repo.findOneScoped(key, tenantId);
+      expect(result).toBeNull();
+    });
+  });
+
+<% } -%>
+});

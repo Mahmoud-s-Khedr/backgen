@@ -52,6 +52,10 @@ This document explains how the `bcm` CLI works internally: from reading a `.pris
 │  │  app-    │ │ infra- │ │ prisma-  │ │ swagger- │  │
 │  │generator │ │generator│ │generator │ │generator │  │
 │  └──────────┘ └────────┘ └──────────┘ └──────────┘  │
+│  ┌───────────┐ ┌──────────┐ ┌──────────┐              │
+│  │api-client-│ │  job-    │ │   ws-    │              │
+│  │generator  │ │generator │ │generator │              │
+│  └───────────┘ └──────────┘ └──────────┘              │
 │                         │                            │
 │          Template Engine (EJS)                       │
 └──────────────────────────────────────────────────────┘
@@ -192,14 +196,17 @@ Source: `src/generator/`
 1. Calls `validateSchemaOrThrow(schema)` — fail fast on errors
 2. Builds a map of generator functions keyed by `--only` part name:
    ```
-   routes    → generateModuleFiles(schema, framework)
-   config    → generateConfigFiles(schema, framework)
+   routes     → generateModuleFiles(schema, framework)
+   config     → generateConfigFiles(schema, framework, options.jobs)
    middleware → generateMiddlewareFiles(schema, framework)
-   utils     → generateUtilsFiles(schema)
-   app       → generateAppFiles(schema, framework)
-   infra     → generateInfraFiles(schema, options)
-   prisma    → generatePrismaFiles(schema)
-   swagger   → generateSwaggerFiles(schema)
+   utils      → generateUtilsFiles(schema)
+   app        → generateAppFiles(schema, framework, options.jobs)
+   infra      → generateInfraFiles(schema, options)
+   prisma     → generatePrismaFiles(schema)
+   swagger    → generateSwaggerFiles(schema)
+   api-client → generateApiClientFiles(schema)
+   jobs       → generateJobFiles(options.jobs)  // only when --jobs is set
+   ws         → generateWsFiles(schema)        // only when --ws is set
    ```
 3. If `--only` is specified, runs only that generator; otherwise runs all
 4. Deduplicates and returns the full `GeneratedFile[]` array
@@ -218,6 +225,9 @@ The `framework` option (`'express' | 'fastify'`) is threaded into every generato
 | `infra-generator.ts` | `docker-compose.yml`, `Dockerfile`, `.env.example`, `.github/workflows/ci.yml`, `.gitignore`, `README.md`, `package.json`, `tsconfig.json`, `vitest.config.ts` |
 | `prisma-generator.ts` | `prisma/seed.ts` |
 | `swagger-generator.ts` | `openapi.json` |
+| `api-client-generator.ts` | `postman-collection.json` |
+| `job-generator.ts` | `src/jobs/{queue,worker,example.job}.ts` (when `--jobs` is set) |
+| `ws-generator.ts` | `src/ws/{ws-types,ws-server,ws-broadcast}.ts` (when `--ws` is set) |
 
 ### Framework-specific template selection
 

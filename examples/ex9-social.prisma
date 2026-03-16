@@ -1,6 +1,7 @@
 // Example 9: Social Network
 // Complexity: Nine models with self-refs, polymorphic patterns, all directives
-// Demonstrates: self-referential relations, @bcm.searchable, @bcm.hidden, @bcm.writeOnly, @bcm.readonly, @bcm.protected, @bcm.softDelete, @bcm.nested, enums
+// Demonstrates: self-referential relations, @bcm.searchable, @bcm.hidden, @bcm.writeOnly, @bcm.readonly,
+//   @bcm.protected, @bcm.softDelete, @bcm.nested, @bcm.ws, @bcm.event, @bcm.transform, enums
 
 datasource db {
   provider = "postgresql"
@@ -14,7 +15,9 @@ generator client {
 /// @bcm.protected
 model User {
   id             String         @id @default(uuid())
+  /// @bcm.transform(trim: true)
   username       String         @unique
+  /// @bcm.transform(trim: true, lowercase: true)
   email          String         @unique
   /// @bcm.searchable
   displayName    String
@@ -38,6 +41,7 @@ model User {
 }
 
 /// @bcm.softDelete
+/// @bcm.ws
 model Post {
   id        String    @id @default(uuid())
   /// @bcm.searchable
@@ -61,6 +65,7 @@ model Post {
 }
 
 /// @bcm.softDelete
+/// @bcm.event
 model Comment {
   id        String    @id @default(uuid())
   /// @bcm.searchable

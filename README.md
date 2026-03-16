@@ -8,13 +8,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js >= 18](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](package.json)
 
-Backgen turns a Prisma schema into a structured Express or Fastify codebase with controllers, services, repositories, DTOs, route tests, OpenAPI output, and deployable infra files.
+Backgen turns a Prisma schema into a structured Express or Fastify codebase with controllers, services, repositories, DTOs, route tests, repository unit tests, OpenAPI output, Postman collection export, background job scaffolding (BullMQ or pg-boss), real-time WebSocket support, and deployable infra files.
 
 ## Why Backgen
 
 - Generates CRUD modules from Prisma models, including selector-aware item routes for `@id`, `@@id`, `@unique`, and `@@unique`.
 - Uses schema directives to control auth, RBAC, soft delete, caching, uploads, searchable fields, and nested relation inputs.
-- Produces route tests that mock Prisma delegates, so generated `pnpm test` does not require a database.
+- Produces route tests and repository unit tests that mock Prisma delegates, so generated `pnpm test` does not require a database.
+- Exports a Postman Collection v2.1 JSON importable by Postman, Insomnia, Thunder Client, or Bruno.
 - Ships a CLI-backed playground package that uses the same generation pipeline as the published CLI.
 
 ## Quick Start
@@ -35,7 +36,7 @@ pnpm exec prisma migrate dev --name init
 pnpm dev
 ```
 
-Use `--framework fastify` to target Fastify instead of the default Express output.
+Use `--framework fastify` to target Fastify instead of the default Express output. Add `--jobs bullmq` or `--jobs pg-boss` for background job scaffolding. Add `--ws` for real-time WebSocket support (models with `@bcm.ws` broadcast mutations to subscribers).
 
 ## Canonical Example Schema
 
@@ -101,7 +102,7 @@ For the schema above, Backgen emits routes under `/api/v1` plus shared service e
 - `GET /health`
 - Swagger UI at `/api/docs`
 
-Generated auth uses access tokens plus refresh-token rotation when an `@bcm.authModel` is present. `ACCESS_TOKEN_TTL` defaults to `15m`, and Redis is required for auth sessions and for `@bcm.cache`.
+Generated auth uses access tokens plus refresh-token rotation when an `@bcm.authModel` is present. `ACCESS_TOKEN_TTL` defaults to `15m`, and Redis is required for auth sessions, `@bcm.cache`, and `--jobs bullmq`.
 
 ## Output Snapshot
 
@@ -115,10 +116,13 @@ src/
     auth/
     user/
     post/
+  jobs/          # when --jobs is used
+  ws/            # when --ws is used
   utils/
 prisma/
   seed.ts
 openapi.json
+postman-collection.json
 Dockerfile
 docker-compose.yml
 .env.example

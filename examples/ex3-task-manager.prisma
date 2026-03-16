@@ -1,6 +1,6 @@
 // Example 3: Task Manager with Enums
 // Complexity: Three models, enums for Priority and Status
-// Demonstrates: enums, @bcm.searchable, @bcm.readonly
+// Demonstrates: enums, @bcm.searchable, @bcm.readonly, @bcm.rateLimit
 
 datasource db {
   provider = "postgresql"
@@ -33,6 +33,7 @@ model Project {
   @@index([ownerId])
 }
 
+/// @bcm.rateLimit(max: 60, window: "1m")
 model Task {
   id        String   @id @default(uuid())
   /// @bcm.searchable

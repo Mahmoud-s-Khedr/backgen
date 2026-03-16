@@ -9,7 +9,7 @@ export function generateUtilsFiles(
     framework: 'express' | 'fastify' = 'express'
 ): GeneratedFile[] {
     const data = { datasource: schema.datasource, framework };
-    const hasEvent = schema.models.some((m) => m.isEvent);
+    const hasEvent = schema.models.some((m) => m.isEvent) || schema.models.some((m) => m.directives.includes('ws'));
     const hasAudit = schema.models.some((m) => m.isAudit);
 
     const files: GeneratedFile[] = [

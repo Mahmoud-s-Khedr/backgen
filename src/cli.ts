@@ -30,6 +30,15 @@ function parseFramework(value: string): 'express' | 'fastify' {
     );
 }
 
+function parseJobs(value: string): 'bullmq' | 'pg-boss' {
+    if (value === 'bullmq' || value === 'pg-boss') {
+        return value;
+    }
+    throw new InvalidArgumentError(
+        `Invalid jobs provider "${value}". Expected one of: bullmq, pg-boss.`
+    );
+}
+
 program
     .name('bcm')
     .description(
@@ -54,7 +63,7 @@ program
     .option('--dry-run', 'Preview generated files without writing to disk', false)
     .option(
         '--only <part>',
-        'Generate only a specific part (routes, config, middleware, utils, app, infra, prisma, swagger)'
+        'Generate only a specific part (routes, config, middleware, utils, app, infra, prisma, swagger, api-client, ws)'
     )
     .option('--json', 'Output machine-readable JSON only', false)
     .option('--force', 'Overwrite existing output directory', false)
@@ -64,6 +73,12 @@ program
         parseFramework,
         'express'
     )
+    .option(
+        '--jobs <provider>',
+        'Add background job scaffolding (bullmq or pg-boss)',
+        parseJobs
+    )
+    .option('--ws', 'Add WebSocket support for real-time model events')
     .action(generateCommand);
 
 program

@@ -162,7 +162,7 @@ describe('bcm add', () => {
             const result = JSON.parse(stdout.text());
             expect(result.success).toBe(true);
             expect(result.model).toBe('Post');
-            expect(result.files).toHaveLength(6);
+            expect(result.files).toHaveLength(7);
             expect(result.files.map((f: { path: string }) => f.path)).toContain('src/modules/post/post.service.ts');
         } finally {
             await ws.cleanup();

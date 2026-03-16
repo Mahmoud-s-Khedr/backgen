@@ -168,7 +168,8 @@ export function generateModuleFiles(schema: ParsedSchema, framework: 'express' |
 
         const uploadFields = scalarFields.filter((f) => f.directives.includes('upload'));
         const cacheConfig = model.cacheConfig ?? null;
-        const isEvent = model.isEvent ?? false;
+        const hasWs = model.directives.includes('ws');
+        const isEvent = (model.isEvent ?? false) || hasWs;
         const isAudit = model.isAudit ?? false;
         const multitenancyConfig = model.multitenancyConfig ?? null;
         const hasAnyAudit = schema.models.some((m) => m.isAudit);
@@ -244,6 +245,11 @@ export function generateModuleFiles(schema: ParsedSchema, framework: 'express' |
         files.push({
             path: `${modulePath}/${modelLower}.test.ts`,
             content: renderTemplate(testTemplate, templateData),
+        });
+
+        files.push({
+            path: `${modulePath}/${modelLower}.repository.test.ts`,
+            content: renderTemplate('module/repository.test.ts.ejs', templateData),
         });
     }
 

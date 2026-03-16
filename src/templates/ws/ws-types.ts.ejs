@@ -1,0 +1,34 @@
+// ── Client → Server messages ──────────────────────────────────────
+
+export interface WsSubscribeMessage {
+  type: 'subscribe';
+  /** Model name to subscribe to (e.g. "Post") */
+  model: string;
+  /** Optional record id — subscribe to a single record's events */
+  id?: string;
+}
+
+export interface WsUnsubscribeMessage {
+  type: 'unsubscribe';
+  model: string;
+  id?: string;
+}
+
+export type WsClientMessage = WsSubscribeMessage | WsUnsubscribeMessage;
+
+// ── Server → Client messages ──────────────────────────────────────
+
+export interface WsEventMessage {
+  type: 'event';
+  model: string;
+  action: 'created' | 'updated' | 'deleted';
+  data: unknown;
+  timestamp: string;
+}
+
+export interface WsErrorMessage {
+  type: 'error';
+  message: string;
+}
+
+export type WsServerMessage = WsEventMessage | WsErrorMessage;

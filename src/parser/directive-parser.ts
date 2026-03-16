@@ -47,6 +47,7 @@ const VALID_MODEL_DIRECTIVES: Set<string> = new Set([
     'event',
     'audit',
     'multitenancy',
+    'ws',
 ]);
 
 /**

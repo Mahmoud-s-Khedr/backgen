@@ -9,7 +9,8 @@ Backgen converts Prisma schema definitions into a production-ready Express + Typ
 Core strategy:
 - Parse schema + directives once.
 - Build model metadata.
-- Generate templates for routes/controllers/services/DTOs/tests/infra.
+- Generate templates for routes/controllers/services/DTOs/tests/repository tests/infra.
+- Generate Postman Collection v2.1 for API testing.
 - Expose generation through both CLI and a web playground.
 
 ## 3) Architecture Decisions and Tradeoffs
@@ -54,6 +55,10 @@ Core strategy:
 | Example matrix is maintained through script | `scripts/run-examples.js` and `pnpm run examples` |
 | Playground uses CLI path in monolithic service | `packages/playground/server/*` + `packages/playground/src/generator.ts` |
 | Multi-provider support is implemented | Prisma provider-aware generation logic and templates (`src/generator/*`, `src/templates/infra/*`) |
+| Repository unit tests generated per model | `src/templates/module/repository.test.ts.ejs` — 7 files per model |
+| Postman collection export | `--only api-client` generates `postman-collection.json` (Postman v2.1) |
+| Background job scaffolding | `--jobs bullmq` or `--jobs pg-boss` generates typed queue, worker, and example job files |
+| WebSocket real-time support | `--ws` + `@bcm.ws` generates ws-server, ws-broadcast, ws-types; auto-enables event bus for marked models |
 
 ## 7) Future Roadmap
 1. Add benchmark suite for generation throughput and memory profile.

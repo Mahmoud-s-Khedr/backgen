@@ -1,0 +1,142 @@
+<% if (jobsProvider === 'bullmq') { -%>
+import { Queue, Worker, type Job, type Processor } from 'bullmq';
+import { env } from '../config/env.js';
+import { logger } from '../config/logger.js';
+
+const connection = {
+  host: new URL(env.REDIS_URL).hostname,
+  port: Number(new URL(env.REDIS_URL).port) || 6379,
+};
+
+const queues = new Map<string, Queue>();
+
+/**
+ * Get or create a BullMQ queue by name.
+ */
+export function getQueue(name: string): Queue {
+  if (!queues.has(name)) {
+    queues.set(name, new Queue(name, { connection }));
+  }
+  return queues.get(name)!;
+}
+
+/**
+ * Create a BullMQ worker that processes jobs from a named queue.
+ */
+export function createWorker<T = unknown>(
+  queueName: string,
+  processor: Processor<T>,
+  concurrency = 5,
+): Worker<T> {
+  const worker = new Worker<T>(queueName, processor, {
+    connection,
+    concurrency,
+  });
+
+  worker.on('completed', (job: Job<T>) => {
+    logger.info({ jobId: job.id, queue: queueName }, 'Job completed');
+  });
+
+  worker.on('failed', (job: Job<T> | undefined, error: Error) => {
+    logger.error({ jobId: job?.id, queue: queueName, error: error.message }, 'Job failed');
+  });
+
+  return worker;
+}
+
+/**
+ * Enqueue a job on the given queue.
+ */
+export async function enqueue<T = unknown>(
+  queueName: string,
+  jobName: string,
+  data: T,
+  opts?: { delay?: number; attempts?: number; priority?: number },
+): Promise<string> {
+  const queue = getQueue(queueName);
+  const job = await queue.add(jobName, data, {
+    attempts: opts?.attempts ?? 3,
+    backoff: { type: 'exponential', delay: 1000 },
+    delay: opts?.delay,
+    priority: opts?.priority,
+  });
+  return job.id ?? '';
+}
+
+/**
+ * Gracefully close all queues and workers.
+ */
+export async function closeAllQueues(): Promise<void> {
+  const closing = [...queues.values()].map((q) => q.close());
+  await Promise.all(closing);
+  queues.clear();
+}
+<% } else { -%>
+import PgBoss from 'pg-boss';
+import { env } from '../config/env.js';
+import { logger } from '../config/logger.js';
+
+let boss: PgBoss | null = null;
+
+/**
+ * Get or create the pg-boss instance.
+ */
+export function getBoss(): PgBoss {
+  if (!boss) {
+    boss = new PgBoss(env.DATABASE_URL);
+
+    boss.on('error', (error: Error) => {
+      logger.error({ error: error.message }, 'pg-boss error');
+    });
+  }
+  return boss;
+}
+
+/**
+ * Start the pg-boss instance (must be called before enqueue/work).
+ */
+export async function startBoss(): Promise<PgBoss> {
+  const b = getBoss();
+  await b.start();
+  logger.info('pg-boss started');
+  return b;
+}
+
+/**
+ * Enqueue a job on the given queue.
+ */
+export async function enqueue<T extends object = object>(
+  queueName: string,
+  data: T,
+  opts?: { retryLimit?: number; startAfter?: number; priority?: number },
+): Promise<string | null> {
+  const b = getBoss();
+  return b.send(queueName, data, {
+    retryLimit: opts?.retryLimit ?? 3,
+    retryBackoff: true,
+    startAfter: opts?.startAfter,
+    priority: opts?.priority,
+  });
+}
+
+/**
+ * Register a worker that processes jobs from a named queue.
+ */
+export async function work<T extends object = object>(
+  queueName: string,
+  handler: (job: PgBoss.Job<T>) => Promise<void>,
+): Promise<string> {
+  const b = getBoss();
+  return b.work<T>(queueName, handler);
+}
+
+/**
+ * Gracefully stop the pg-boss instance.
+ */
+export async function closeBoss(): Promise<void> {
+  if (boss) {
+    await boss.stop();
+    boss = null;
+  }
+}
+<% } -%>

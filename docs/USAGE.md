@@ -76,6 +76,8 @@ bcm generate --schema <path> --output <path> [options]
 | `--json` | | Emit machine-readable JSON only | `false` |
 | `--force` | | Overwrite targeted output | `false` |
 | `--framework <name>` | | `express` or `fastify` | `express` |
+| `--jobs <provider>` | | Add background job scaffolding (`bullmq` or `pg-boss`) | none |
+| `--ws` | | Add WebSocket support for real-time model events | `false` |
 
 Accepted `--only` values:
 
@@ -87,6 +89,9 @@ Accepted `--only` values:
 - `infra`
 - `prisma`
 - `swagger`
+- `api-client`
+- `jobs` (requires `--jobs` flag)
+- `ws` (requires `--ws` flag)
 
 Important behavior:
 
@@ -108,6 +113,18 @@ bcm generate --schema ./prisma/schema.prisma --output . --dry-run
 
 # Regenerate only OpenAPI
 bcm generate --schema ./prisma/schema.prisma --output . --only swagger --force
+
+# Export Postman collection
+bcm generate --schema ./prisma/schema.prisma --output . --only api-client --force
+
+# Generate with BullMQ background jobs
+bcm generate --schema ./prisma/schema.prisma --output . --force --jobs bullmq
+
+# Generate with pg-boss background jobs
+bcm generate --schema ./prisma/schema.prisma --output . --force --jobs pg-boss
+
+# Generate with WebSocket support
+bcm generate --schema ./prisma/schema.prisma --output . --force --ws
 ```
 
 Success JSON shape:
@@ -208,6 +225,7 @@ Model directives:
 - `@bcm.auth(roles: [...])`
 - `@bcm.authModel`
 - `@bcm.cache(ttl: N)`
+- `@bcm.ws`
 
 Field directives:
 
@@ -267,12 +285,12 @@ Conditionally generated:
 
 - `JWT_SECRET` when any model uses `@bcm.authModel`, `@bcm.protected`, or `@bcm.auth(...)`
 - `ACCESS_TOKEN_TTL` when an auth model exists
-- `REDIS_URL` when an auth model exists or any model uses `@bcm.cache`
+- `REDIS_URL` when an auth model exists, any model uses `@bcm.cache`, or `--jobs bullmq` is used
 - Upload storage variables when any field uses `@bcm.upload(...)`
 
 Operational note:
 
-- Redis/Valkey is required both for auth refresh-token sessions and for `@bcm.cache`.
+- Redis/Valkey is required for auth refresh-token sessions, `@bcm.cache`, and `--jobs bullmq`.
 
 ## Generated Project Snapshot
 
@@ -285,10 +303,13 @@ src/
   config/
   middlewares/
   modules/
+  jobs/          # when --jobs is used
+  ws/            # when --ws is used
   utils/
 prisma/
   seed.ts
 openapi.json
+postman-collection.json
 Dockerfile
 docker-compose.yml
 .env.example

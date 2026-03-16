@@ -5,11 +5,11 @@ import { renderTemplate } from '../template-engine.js';
  * Generate config files: database, swagger, cors, logger, env.
  * Conditionally generates redis.ts and upload.ts when schema uses those features.
  */
-export function generateConfigFiles(schema: ParsedSchema, framework: 'express' | 'fastify' = 'express'): GeneratedFile[] {
+export function generateConfigFiles(schema: ParsedSchema, framework: 'express' | 'fastify' = 'express', jobsProvider?: 'bullmq' | 'pg-boss'): GeneratedFile[] {
     const hasCache = schema.models.some((m) => m.cacheConfig != null);
     const hasUploads = schema.models.some((m) => m.fields.some((f) => f.directives.includes('upload')));
     const hasAuth = schema.models.some((m) => m.isAuthModel);
-    const data = { schema, hasCache, hasUploads, hasAuth, framework, provider: schema.datasource.provider };
+    const data = { schema, hasCache, hasUploads, hasAuth, framework, provider: schema.datasource.provider, jobsProvider: jobsProvider ?? null };
 
     const files: GeneratedFile[] = [
         {
@@ -37,7 +37,7 @@ export function generateConfigFiles(schema: ParsedSchema, framework: 'express' |
         },
     ];
 
-    if (hasCache || hasAuth) {
+    if (hasCache || hasAuth || jobsProvider === 'bullmq') {
         files.push({
             path: 'src/config/redis.ts',
             content: renderTemplate('config/redis.ts.ejs', data),

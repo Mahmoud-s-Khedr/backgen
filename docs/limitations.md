@@ -24,12 +24,12 @@ These are generated into `.env.example` only when needed.
 | `DATABASE_URL` | Always |
 | `JWT_SECRET` with minimum length 32 | Any model uses `@bcm.authModel`, `@bcm.protected`, or `@bcm.auth(...)` |
 | `ACCESS_TOKEN_TTL` | An auth model exists |
-| `REDIS_URL` and a running Redis/Valkey instance | An auth model exists or any model uses `@bcm.cache` |
+| `REDIS_URL` and a running Redis/Valkey instance | An auth model exists, any model uses `@bcm.cache`, or `--jobs bullmq` is used |
 | Upload storage variables | Any field uses `@bcm.upload(...)` |
 
 Operational note:
 
-- Generated servers connect to Redis before serving traffic when auth refresh sessions or caching are enabled.
+- Generated servers connect to Redis before serving traffic when auth refresh sessions, caching, or BullMQ jobs are enabled.
 
 ## Current Design Boundaries
 
@@ -63,7 +63,27 @@ These are intentional or at least current product boundaries, not validation fai
 ### Tests
 
 - Generated tests are route/integration-style tests over mocked Prisma delegates.
+- Repository unit tests mock Prisma delegates directly and test the data access layer in isolation.
 - No e2e database test harness is generated.
+
+### API Client Export
+
+- The generated Postman collection uses static sample values; directive constraints (e.g., min/max lengths from `@bcm.transform`) are not reflected in sample payloads.
+- Collection variable `{{authToken}}` must be set manually after login.
+
+### Background Jobs
+
+- Only one example job is generated; additional job types must be added manually.
+- BullMQ requires a running Redis instance; pg-boss uses the existing PostgreSQL database.
+- Job retry policies, concurrency, and scheduling are left at library defaults; customize in the generated `queue.ts`.
+- No admin UI or dashboard is generated for monitoring job queues.
+
+### WebSocket
+
+- WebSocket support is pub/sub only — clients subscribe to model events, the server broadcasts. There is no request/response pattern over WebSocket.
+- No authentication or authorization is applied to WebSocket connections; any client can subscribe to any model's events.
+- The `ws` package is used directly (not socket.io); clients must use the native WebSocket API or a compatible library.
+- Only models with `@bcm.ws` broadcast mutations; other models are not exposed over WebSocket.
 
 ### Eject
 

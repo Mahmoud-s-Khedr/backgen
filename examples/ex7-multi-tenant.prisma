@@ -1,6 +1,7 @@
 // Example 7: Multi-Tenant SaaS Platform
 // Complexity: Six models with multi-tenant structure
-// Demonstrates: @bcm.authModel, @bcm.identifier, @bcm.password, @bcm.protected, @bcm.auth(roles), @bcm.searchable, enums, multi-tenant patterns
+// Demonstrates: @bcm.authModel, @bcm.identifier, @bcm.password, @bcm.protected, @bcm.auth(roles),
+//   @bcm.searchable, @bcm.multitenancy, @bcm.event, @bcm.audit, enums, multi-tenant patterns
 
 datasource db {
   provider = "postgresql"
@@ -12,6 +13,7 @@ generator client {
 }
 
 /// @bcm.auth(roles: [OWNER, ADMIN])
+/// @bcm.audit
 model Organization {
   id        String   @id @default(uuid())
   /// @bcm.searchable
@@ -63,6 +65,7 @@ model User {
 }
 
 /// @bcm.protected
+/// @bcm.multitenancy(field: "organizationId")
 model Project {
   id             String       @id @default(uuid())
   /// @bcm.searchable
@@ -83,6 +86,7 @@ model Project {
 }
 
 /// @bcm.protected
+/// @bcm.event
 model Task {
   id        String   @id @default(uuid())
   /// @bcm.searchable

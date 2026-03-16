@@ -24,17 +24,24 @@ const HEALTH_POLL_INTERVAL_MS = 1_000;
 const DOCKER_BASE_PORT = 3_000;
 const FRAMEWORKS = ['express', 'fastify'];
 
+const KNOWN_DIRECTIVES = [
+  'protected', 'softDelete', 'auth', 'authModel', 'cache', 'rateLimit',
+  'cursor', 'event', 'audit', 'multitenancy', 'ws',
+  'hidden', 'readonly', 'writeOnly', 'searchable', 'nested',
+  'identifier', 'password', 'upload', 'transform',
+];
+
 function printUsageAndExit(message) {
   if (message) {
     console.error(message);
   }
-  console.error('Usage: node scripts/run-examples.js [--framework <express|fastify|both>]');
+  console.error('Usage: node scripts/run-examples.js [--framework <express|fastify|both>] [--jobs <bullmq|pg-boss>]');
   console.error('       node scripts/run-examples.js [-f <express|fastify|both>]');
   process.exit(1);
 }
 
-function parseFrameworkArg(argv) {
-  let frameworkSelection = 'both';
+function parseArgs(argv) {
+  const result = { frameworks: [...FRAMEWORKS], jobs: null };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -43,29 +50,56 @@ function parseFrameworkArg(argv) {
       if (!value || value.startsWith('-')) {
         printUsageAndExit(`Missing value for ${arg}`);
       }
-      frameworkSelection = value.toLowerCase();
+      const frameworkSelection = value.toLowerCase();
+      if (frameworkSelection === 'both') {
+        result.frameworks = [...FRAMEWORKS];
+      } else if (FRAMEWORKS.includes(frameworkSelection)) {
+        result.frameworks = [frameworkSelection];
+      } else {
+        printUsageAndExit(
+          `Invalid framework "${frameworkSelection}". Expected one of: express, fastify, both.`
+        );
+      }
       i += 1;
       continue;
     }
     if (arg.startsWith('--framework=')) {
-      frameworkSelection = arg.slice('--framework='.length).toLowerCase();
+      const frameworkSelection = arg.slice('--framework='.length).toLowerCase();
+      if (frameworkSelection === 'both') {
+        result.frameworks = [...FRAMEWORKS];
+      } else if (FRAMEWORKS.includes(frameworkSelection)) {
+        result.frameworks = [frameworkSelection];
+      } else {
+        printUsageAndExit(
+          `Invalid framework "${frameworkSelection}". Expected one of: express, fastify, both.`
+        );
+      }
+      continue;
+    }
+    if (arg === '--jobs') {
+      const value = argv[i + 1];
+      if (value !== 'bullmq' && value !== 'pg-boss') {
+        printUsageAndExit(
+          `Invalid --jobs value: "${value}". Expected one of: bullmq, pg-boss.`
+        );
+      }
+      result.jobs = value;
+      i += 1;
       continue;
     }
     printUsageAndExit(`Unknown argument: ${arg}`);
   }
 
-  if (frameworkSelection === 'both') {
-    return [...FRAMEWORKS];
-  }
-  if (FRAMEWORKS.includes(frameworkSelection)) {
-    return [frameworkSelection];
-  }
-  printUsageAndExit(
-    `Invalid framework "${frameworkSelection}". Expected one of: express, fastify, both.`
-  );
+  return result;
 }
 
-const selectedFrameworks = parseFrameworkArg(process.argv.slice(2));
+function detectDirectives(schemaText) {
+  return KNOWN_DIRECTIVES.filter((d) => schemaText.includes(`@bcm.${d}`));
+}
+
+const parsedArgs = parseArgs(process.argv.slice(2));
+const selectedFrameworks = parsedArgs.frameworks;
+const jobsArg = parsedArgs.jobs;
 
 // Remove and recreate out/
 rmSync(outDir, { recursive: true, force: true });
@@ -90,6 +124,7 @@ logLine(`startedAt: ${runStartedAt.toISOString()}`);
 logLine(`root: ${root}`);
 logLine(`schemas: ${schemas.length}`);
 logLine(`frameworks: ${selectedFrameworks.join(', ')}`);
+if (jobsArg) logLine(`jobs: ${jobsArg}`);
 logLine(`node: ${process.version}`);
 
 function formatTimestamp(date) {
@@ -484,7 +519,11 @@ for (const schema of schemas) {
   const schemaText = readFileSync(schemaPath, 'utf8');
   const providerMatch = schemaText.match(/provider\s*=\s*["'](\w+)["']/);
   const provider = providerMatch?.[1] ?? 'unknown';
-  
+  const directives = detectDirectives(schemaText);
+  const hasWs = directives.includes('ws');
+
+  console.log(`    directives: ${directives.length > 0 ? directives.join(', ') : '(none)'}`);
+
   for (const framework of selectedFrameworks) {
     const outputDir = join(outDir, name, framework);
     const matrixLabel = `${name} [${framework}]`;
@@ -503,11 +542,17 @@ for (const schema of schemas) {
 
     let matrixRunFailedSteps = 0;
 
+    const generateFlags = [
+      `--framework ${framework}`,
+      hasWs ? '--ws' : '',
+      jobsArg ? `--jobs ${jobsArg}` : '',
+    ].filter(Boolean).join(' ');
+
     const steps = [
       {
         label: 'generate',
         run: () => runCommand(
-          `node ${cli} generate --schema ${schemaPath} --output ${outputDir} --framework ${framework}`,
+          `node ${cli} generate --schema ${schemaPath} --output ${outputDir} ${generateFlags}`,
           root
         ),
       },
@@ -610,6 +655,26 @@ logLine(`warningsActionable: ${warningEntriesActionable.length}`);
 logLine(`errorsRaw: ${errorEntriesRaw.length}`);
 logLine(`errorsActionable: ${errorEntriesActionable.length}`);
 logLine(`logPath: ${resolve(logPath)}`);
+if (jobsArg) logLine(`jobsProvider: ${jobsArg}`);
+
+logLine('\n[directive coverage]');
+const directiveCoverage = new Map();
+for (const schema of schemas) {
+  const schemaPath = join(examplesDir, schema);
+  const schemaText = readFileSync(schemaPath, 'utf8');
+  const directives = detectDirectives(schemaText);
+  const name = basename(schema, '.prisma');
+  logLine(`  ${name}: ${directives.length > 0 ? directives.join(', ') : '(none)'}`);
+  for (const d of directives) {
+    directiveCoverage.set(d, (directiveCoverage.get(d) || 0) + 1);
+  }
+}
+const coveredCount = directiveCoverage.size;
+const uncovered = KNOWN_DIRECTIVES.filter((d) => !directiveCoverage.has(d));
+logLine(`  covered: ${coveredCount}/${KNOWN_DIRECTIVES.length}`);
+if (uncovered.length > 0) {
+  logLine(`  uncovered: ${uncovered.join(', ')}`);
+}
 
 logLine('\n[warning summary actionable]');
 if (warningEntriesActionable.length === 0) {
@@ -630,6 +695,9 @@ if (errorEntriesActionable.length === 0) {
 }
 
 console.log(`\nframeworks: ${selectedFrameworks.join(', ')}`);
+if (jobsArg) console.log(`jobs: ${jobsArg}`);
+console.log(`directive coverage: ${directiveCoverage.size}/${KNOWN_DIRECTIVES.length}`);
+if (uncovered.length > 0) console.log(`uncovered directives: ${uncovered.join(', ')}`);
 console.log(`${matrixPassed} passed, ${matrixFailed} failed (matrix runs)`);
 console.log(`${examplesWithFailures.size} examples with at least one framework failure`);
 console.log(`Log file: ${resolve(logPath)}`);

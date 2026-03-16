@@ -13,10 +13,13 @@ src/
   config/
   middlewares/
   modules/
+  jobs/          # when --jobs is used
+  ws/            # when --ws is used
   utils/
 prisma/
   seed.ts
 openapi.json
+postman-collection.json
 Dockerfile
 docker-compose.yml
 .env.example
@@ -28,6 +31,8 @@ vitest.config.ts
 
 `openapi.json` is generated directly from the parsed schema and the same selector/nested rules used by the route generator.
 
+`postman-collection.json` is a Postman Collection v2.1 file with per-model request folders, sample bodies, and auth headers for protected routes. It can be imported into Postman, Insomnia, Thunder Client, or Bruno.
+
 ## Per-Model Modules
 
 For each model, Backgen writes:
@@ -38,6 +43,7 @@ For each model, Backgen writes:
 - `<model>.routes.ts`
 - `<model>.dto.ts`
 - `<model>.test.ts`
+- `<model>.repository.test.ts`
 
 ### Repository
 
@@ -112,6 +118,20 @@ What they validate:
 
 The generated test suite does not require a live database.
 
+### Repository Tests
+
+Generated repository tests use Vitest with mocked Prisma delegates to unit-test the data access layer in isolation.
+
+What they validate:
+
+- `findMany` returns `{ data, total }` from mocked `findMany` + `count`
+- `findOne` uses `findUnique` (or `findFirst` for soft-delete models)
+- `create`/`update`/`delete` delegate calls and P2025 error mapping to 404
+- `toWhereUnique` key-to-where mapping for simple and composite selectors
+- `toInclude` relation normalization
+- `findManyCursor` cursor-based pagination (when `@bcm.cursor` is present)
+- `findOneScoped` tenant-scoped queries (when `@bcm.multitenancy` is present)
+
 ## Shared Config
 
 Generated config files typically include:
@@ -124,14 +144,15 @@ Generated config files typically include:
 
 Conditionally generated:
 
-- `src/config/redis.ts` when an auth model exists or any model uses `@bcm.cache`
+- `src/config/redis.ts` when an auth model exists, any model uses `@bcm.cache`, or `--jobs bullmq` is used
+- `src/utils/event-bus.ts` when any model uses `@bcm.event` or `@bcm.ws`
 - `src/config/upload.ts` when any field uses `@bcm.upload(...)`
 
 Notable environment behavior:
 
 - `JWT_SECRET` is only present when auth is needed
 - `ACCESS_TOKEN_TTL` appears only when an auth model exists
-- `REDIS_URL` appears for auth refresh sessions and for caching
+- `REDIS_URL` appears for auth refresh sessions, caching, and BullMQ job queues
 
 ## App and Auth Files
 
@@ -186,6 +207,32 @@ Generated package scripts:
 - `seed`
 - `studio`
 - `generate`
+
+## Background Jobs
+
+When `--jobs bullmq` or `--jobs pg-boss` is passed, Backgen generates:
+
+- `src/jobs/queue.ts` — queue/worker creation and `enqueue()` helper
+- `src/jobs/worker.ts` — worker startup function called from `server.ts`
+- `src/jobs/example.job.ts` — typed example job processor
+
+BullMQ uses Redis (`REDIS_URL`) for its backing store. pg-boss uses the existing PostgreSQL database (`DATABASE_URL`).
+
+The generated `server.ts` starts workers after database/Redis connection and shuts them down gracefully on `SIGTERM`/`SIGINT`.
+
+## WebSocket Support
+
+When `--ws` is passed and at least one model has `@bcm.ws`, Backgen generates:
+
+- `src/ws/ws-types.ts` — typed client/server message definitions (subscribe, unsubscribe, event, error)
+- `src/ws/ws-server.ts` — WebSocket server using the `ws` package, attached to the HTTP server; maintains per-connection subscription registry with heartbeat monitoring
+- `src/ws/ws-broadcast.ts` — bridges the event bus to WebSocket clients; only forwards events for models marked `@bcm.ws`
+
+`@bcm.ws` on a model auto-enables event bus emission in that model's service (equivalent to `@bcm.event`). The `ws-broadcast.ts` module listens to the `*` wildcard on the event bus and sends matching events to subscribed WebSocket clients.
+
+Clients subscribe by sending `{ "type": "subscribe", "model": "Post" }` (or `{ "type": "subscribe", "model": "Post", "id": "abc" }` for single-record subscriptions). The server broadcasts `{ "type": "event", "model": "Post", "action": "created", "data": {...}, "timestamp": "..." }` to matching subscribers.
+
+The generated `server.ts` attaches the WebSocket server after `app.listen()` and closes it during graceful shutdown.
 
 ## Framework Split
 

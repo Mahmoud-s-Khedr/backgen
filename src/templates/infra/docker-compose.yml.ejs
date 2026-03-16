@@ -1,5 +1,5 @@
 <% const dbName = h.toSnakeCase(projectName || 'app'); -%>
-<% const needsRedis = hasCache || hasAuth; -%>
+<% const needsRedis = hasCache || hasAuth || jobsProvider === 'bullmq'; -%>
 <% if (provider === 'sqlite') { -%>
 services:
   app:

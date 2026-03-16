@@ -1,6 +1,6 @@
 // Example 1: Simple Todo List (SQLite)
 // Complexity: Single model, basic field types
-// Demonstrates: @bcm.readonly, SQLite provider (no Docker DB needed)
+// Demonstrates: @bcm.readonly, @bcm.transform, SQLite provider (no Docker DB needed)
 
 datasource db {
   provider = "sqlite"
@@ -13,6 +13,7 @@ generator client {
 
 model Todo {
   id          String   @id @default(uuid())
+  /// @bcm.transform(trim: true)
   title       String
   description String?
   completed   Boolean  @default(false)

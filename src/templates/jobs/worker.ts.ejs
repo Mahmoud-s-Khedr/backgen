@@ -1,0 +1,39 @@
+<% if (jobsProvider === 'bullmq') { -%>
+import { createWorker } from './queue.js';
+import { exampleProcessor } from './example.job.js';
+import { logger } from '../config/logger.js';
+
+/**
+ * Register all job workers.
+ * Called from server.ts after database and Redis connections are established.
+ */
+export function startWorkers(): void {
+  createWorker('example', exampleProcessor);
+
+  // Add more workers here:
+  // createWorker('emails', emailProcessor);
+  // createWorker('reports', reportProcessor);
+
+  logger.info('Job workers started');
+}
+<% } else { -%>
+import { startBoss, work } from './queue.js';
+import { exampleHandler } from './example.job.js';
+import { logger } from '../config/logger.js';
+
+/**
+ * Register all job workers.
+ * Called from server.ts after database connection is established.
+ */
+export async function startWorkers(): Promise<void> {
+  await startBoss();
+
+  await work('example', exampleHandler);
+
+  // Add more workers here:
+  // await work('emails', emailHandler);
+  // await work('reports', reportHandler);
+
+  logger.info('Job workers started');
+}
+<% } -%>

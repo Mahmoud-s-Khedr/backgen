@@ -1,6 +1,7 @@
 // Example 8: E-Commerce Platform
 // Complexity: Nine models with complex relations and enums
-// Demonstrates: enums, @bcm.authModel, @bcm.identifier, @bcm.password, @bcm.searchable, @bcm.readonly, @bcm.hidden, @bcm.softDelete, @bcm.nested, @bcm.auth, @bcm.cache
+// Demonstrates: enums, @bcm.authModel, @bcm.identifier, @bcm.password, @bcm.searchable, @bcm.readonly,
+//   @bcm.hidden, @bcm.softDelete, @bcm.nested, @bcm.auth, @bcm.cache, @bcm.rateLimit, @bcm.event, @bcm.audit
 
 datasource db {
   provider = "postgresql"
@@ -85,6 +86,9 @@ model Category {
 }
 
 /// @bcm.protected
+/// @bcm.rateLimit(max: 30, window: "1m")
+/// @bcm.event
+/// @bcm.audit
 model Order {
   id         String      @id @default(uuid())
   orderNumber String     @unique @default(uuid())

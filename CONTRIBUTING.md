@@ -35,8 +35,19 @@ src/
 │   └── directive-parser.ts
 ├── generator/              # Code generation engine
 │   ├── template-engine.ts  # EJS rendering + helpers
-│   ├── index.ts            # Generator orchestrator
+│   ├── index.ts            # Generator orchestrator (11 generators)
 │   └── generators/         # Per-concern generators
+│       ├── module-generator.ts      # 7 files per model
+│       ├── config-generator.ts
+│       ├── middleware-generator.ts
+│       ├── utils-generator.ts
+│       ├── app-generator.ts
+│       ├── infra-generator.ts
+│       ├── prisma-generator.ts
+│       ├── swagger-generator.ts
+│       ├── api-client-generator.ts  # Postman collection
+│       ├── job-generator.ts        # Background jobs (--jobs flag)
+│       └── ws-generator.ts         # WebSocket support (--ws flag)
 └── templates/              # EJS templates for generated code
 ```
 

@@ -13,6 +13,8 @@ export function generateInfraFiles(schema: ParsedSchema, options?: GenerateOptio
     const hasUploads = schema.models.some((m) => m.fields.some((f) => f.directives.includes('upload')));
     const hasAuth = schema.models.some((m) => m.isAuthModel);
     const framework = options?.framework ?? 'express';
+    const jobsProvider = options?.jobs ?? null;
+    const wsEnabled = options?.ws ?? false;
     const data = {
         models: schema.models,
         schema,
@@ -22,6 +24,8 @@ export function generateInfraFiles(schema: ParsedSchema, options?: GenerateOptio
         hasUploads,
         hasAuth,
         framework,
+        jobsProvider,
+        wsEnabled,
     };
 
     return [

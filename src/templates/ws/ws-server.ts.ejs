@@ -1,0 +1,130 @@
+import { WebSocketServer, WebSocket } from 'ws';
+import type { Server } from 'http';
+import type { WsClientMessage, WsServerMessage } from './ws-types.js';
+
+const HEARTBEAT_INTERVAL = parseInt(process.env.WS_HEARTBEAT_INTERVAL || '30000', 10);
+
+let wss: WebSocketServer | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Per-connection subscription set (e.g. "Post", "Post:abc123") */
+const subscriptions = new Map<WebSocket, Set<string>>();
+
+/** Track alive status for heartbeat */
+const alive = new Map<WebSocket, boolean>();
+
+/**
+ * Attach a WebSocket server to an existing HTTP server.
+ */
+export function setupWebSocketServer(server: Server): void {
+  wss = new WebSocketServer({ server });
+
+  wss.on('connection', (ws) => {
+    subscriptions.set(ws, new Set());
+    alive.set(ws, true);
+
+    ws.on('pong', () => {
+      alive.set(ws, true);
+    });
+
+    ws.on('message', (raw) => {
+      let msg: WsClientMessage;
+      try {
+        msg = JSON.parse(String(raw)) as WsClientMessage;
+      } catch {
+        const err: WsServerMessage = { type: 'error', message: 'Invalid JSON' };
+        ws.send(JSON.stringify(err));
+        return;
+      }
+
+      if (!msg.type || !msg.model) {
+        const err: WsServerMessage = { type: 'error', message: 'Missing "type" or "model" field' };
+        ws.send(JSON.stringify(err));
+        return;
+      }
+
+      const subs = subscriptions.get(ws)!;
+      const channel = msg.id ? `${msg.model}:${msg.id}` : msg.model;
+
+      if (msg.type === 'subscribe') {
+        subs.add(channel);
+      } else if (msg.type === 'unsubscribe') {
+        subs.delete(channel);
+      } else {
+        const err: WsServerMessage = { type: 'error', message: `Unknown message type: "${(msg as { type: string }).type}"` };
+        ws.send(JSON.stringify(err));
+      }
+    });
+
+    ws.on('close', () => {
+      subscriptions.delete(ws);
+      alive.delete(ws);
+    });
+  });
+
+  // Heartbeat: ping all clients periodically, terminate unresponsive ones
+  heartbeatTimer = setInterval(() => {
+    if (!wss) return;
+    for (const ws of wss.clients) {
+      if (alive.get(ws) === false) {
+        subscriptions.delete(ws);
+        alive.delete(ws);
+        ws.terminate();
+        continue;
+      }
+      alive.set(ws, false);
+      ws.ping();
+    }
+  }, HEARTBEAT_INTERVAL);
+}
+
+/**
+ * Broadcast a model event to all subscribed clients.
+ */
+export function broadcast(model: string, action: string, data: unknown): void {
+  if (!wss) return;
+
+  const message: WsServerMessage = {
+    type: 'event',
+    model,
+    action: action as 'created' | 'updated' | 'deleted',
+    data,
+    timestamp: new Date().toISOString(),
+  };
+  const payload = JSON.stringify(message);
+
+  const recordId = data && typeof data === 'object' && 'id' in data
+    ? String((data as { id: unknown }).id)
+    : null;
+
+  for (const ws of wss.clients) {
+    if (ws.readyState !== WebSocket.OPEN) continue;
+
+    const subs = subscriptions.get(ws);
+    if (!subs) continue;
+
+    // Match model-level subscription or record-level subscription
+    if (subs.has(model) || (recordId && subs.has(`${model}:${recordId}`))) {
+      ws.send(payload);
+    }
+  }
+}
+
+/**
+ * Gracefully close the WebSocket server.
+ */
+export function closeWebSocketServer(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (wss) {
+    for (const ws of wss.clients) {
+      ws.close(1001, 'Server shutting down');
+    }
+    wss.close();
+    wss = null;
+  }
+  subscriptions.clear();
+  alive.clear();
+}

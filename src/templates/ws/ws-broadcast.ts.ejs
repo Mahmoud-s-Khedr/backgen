@@ -1,0 +1,12 @@
+import { eventBus } from '../utils/event-bus.js';
+import { broadcast } from './ws-server.js';
+
+/** Models that broadcast mutations over WebSocket */
+const WS_MODELS = new Set([<%- wsModels.map((m) => `'${m}'`).join(', ') %>]);
+
+// Forward matching event-bus events to WebSocket subscribers
+eventBus.on('*', (payload) => {
+  if (WS_MODELS.has(payload.model)) {
+    broadcast(payload.model, payload.action, payload.data);
+  }
+});

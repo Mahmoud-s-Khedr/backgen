@@ -20,13 +20,41 @@ async function main() {
   await redisConnect();
   app.log.info('Redis connected');
 <% } -%>
+<% if (jobsProvider === 'bullmq') { -%>
+  const { startWorkers } = await import('./jobs/worker.js');
+  startWorkers();
+<% } else if (jobsProvider === 'pg-boss') { -%>
+  const { startWorkers } = await import('./jobs/worker.js');
+  await startWorkers();
+<% } -%>
 
   await app.listen({ port: env.PORT, host: '0.0.0.0' });
+<% if (wsEnabled) { -%>
+
+  const { setupWebSocketServer } = await import('./ws/ws-server.js');
+  setupWebSocketServer(app.server);
+  await import('./ws/ws-broadcast.js');
+  app.log.info('WebSocket server attached');
+<% } -%>
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, 'Shutting down gracefully...');
     await app.close();
+<% if (wsEnabled) { -%>
+    const { closeWebSocketServer } = await import('./ws/ws-server.js');
+    closeWebSocketServer();
+    app.log.info('WebSocket server closed');
+<% } -%>
+<% if (jobsProvider === 'bullmq') { -%>
+    const { closeAllQueues } = await import('./jobs/queue.js');
+    await closeAllQueues();
+    app.log.info('Job queues closed');
+<% } else if (jobsProvider === 'pg-boss') { -%>
+    const { closeBoss } = await import('./jobs/queue.js');
+    await closeBoss();
+    app.log.info('pg-boss stopped');
+<% } -%>
 <% if (needsRedis) { -%>
     await redis.quit();
     app.log.info('Redis disconnected');

@@ -1,0 +1,49 @@
+<% if (jobsProvider === 'bullmq') { -%>
+import type { Job } from 'bullmq';
+import { logger } from '../config/logger.js';
+
+export interface ExampleJobData {
+  message: string;
+}
+
+/**
+ * Example job processor.
+ * Replace this with your own job logic.
+ *
+ * Usage:
+ *   import { enqueue } from './queue.js';
+ *   await enqueue('example', 'greet', { message: 'Hello' });
+ */
+export async function exampleProcessor(job: Job<ExampleJobData>): Promise<void> {
+  logger.info({ jobId: job.id, data: job.data }, 'Processing example job');
+
+  // Simulate work
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  logger.info({ jobId: job.id }, 'Example job completed');
+}
+<% } else { -%>
+import type PgBoss from 'pg-boss';
+import { logger } from '../config/logger.js';
+
+export interface ExampleJobData {
+  message: string;
+}
+
+/**
+ * Example job handler.
+ * Replace this with your own job logic.
+ *
+ * Usage:
+ *   import { enqueue } from './queue.js';
+ *   await enqueue('example', { message: 'Hello' });
+ */
+export async function exampleHandler(job: PgBoss.Job<ExampleJobData>): Promise<void> {
+  logger.info({ jobId: job.id, data: job.data }, 'Processing example job');
+
+  // Simulate work
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  logger.info({ jobId: job.id }, 'Example job completed');
+}
+<% } -%>

@@ -105,7 +105,7 @@ describe('generateProject', () => {
 
             const paths = files.map(f => f.path);
 
-            // Module files (5 per model × 2 models = 10)
+            // Module files (7 per model × 2 models = 14)
             expect(paths.some(p => p.includes('modules/user/'))).toBe(true);
             expect(paths.some(p => p.includes('modules/post/'))).toBe(true);
 
@@ -137,9 +137,12 @@ describe('generateProject', () => {
 
             // Swagger
             expect(paths).toContain('openapi.json');
+
+            // API Client
+            expect(paths).toContain('postman-collection.json');
         });
 
-        it('generates 6 files per model (repository, controller, service, routes, dto, test)', async () => {
+        it('generates 7 files per model (repository, controller, service, routes, dto, test, repository.test)', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, defaultOptions, BLOG_SCHEMA);
             const paths = files.map(f => f.path);
@@ -151,6 +154,7 @@ describe('generateProject', () => {
                 expect(paths).toContain(`src/modules/${model}/${model}.routes.ts`);
                 expect(paths).toContain(`src/modules/${model}/${model}.dto.ts`);
                 expect(paths).toContain(`src/modules/${model}/${model}.test.ts`);
+                expect(paths).toContain(`src/modules/${model}/${model}.repository.test.ts`);
             }
         });
     });
@@ -178,6 +182,31 @@ describe('generateProject', () => {
             expect(files[0].path).toBe('openapi.json');
         });
 
+        it('generates only api-client when --only api-client', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'api-client' }, BLOG_SCHEMA);
+
+            expect(files).toHaveLength(1);
+            expect(files[0].path).toBe('postman-collection.json');
+
+            const collection = JSON.parse(files[0].content);
+            expect(collection.info.name).toBe('Generated API');
+            expect(collection.info.schema).toContain('v2.1.0');
+            expect(collection.variable).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({ key: 'baseUrl' }),
+                    expect.objectContaining({ key: 'authToken' }),
+                ])
+            );
+            // Should have one folder per model (User, Post)
+            expect(collection.item.length).toBeGreaterThanOrEqual(2);
+
+            // Each model folder should have at least List + Create
+            for (const folder of collection.item) {
+                expect(folder.item.length).toBeGreaterThanOrEqual(2);
+            }
+        });
+
         it('generates only config files when --only config', async () => {
             const schema = getParsedSchema();
             const files = await generateProject(schema, { ...defaultOptions, only: 'config' }, BLOG_SCHEMA);
@@ -199,6 +228,172 @@ describe('generateProject', () => {
             await expect(
                 generateProject(schema, { ...defaultOptions, only: 'invalid' }, BLOG_SCHEMA)
             ).rejects.toThrow('Unknown --only value');
+        });
+    });
+
+    describe('--jobs flag', () => {
+        it('generates job files when --jobs bullmq is set', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, jobs: 'bullmq' }, BLOG_SCHEMA);
+            const paths = files.map(f => f.path);
+
+            expect(paths).toContain('src/jobs/queue.ts');
+            expect(paths).toContain('src/jobs/worker.ts');
+            expect(paths).toContain('src/jobs/example.job.ts');
+
+            // queue.ts should import from bullmq
+            const queueFile = files.find(f => f.path === 'src/jobs/queue.ts')!;
+            expect(queueFile.content).toContain('bullmq');
+
+            // server.ts should start workers
+            const serverFile = files.find(f => f.path === 'src/server.ts')!;
+            expect(serverFile.content).toContain('startWorkers');
+
+            // package.json should have bullmq dependency
+            const pkgFile = files.find(f => f.path === 'package.json')!;
+            expect(pkgFile.content).toContain('"bullmq"');
+
+            // env config should have REDIS_URL
+            const envFile = files.find(f => f.path === 'src/config/env.ts')!;
+            expect(envFile.content).toContain('REDIS_URL');
+        });
+
+        it('generates job files when --jobs pg-boss is set', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, jobs: 'pg-boss' }, BLOG_SCHEMA);
+            const paths = files.map(f => f.path);
+
+            expect(paths).toContain('src/jobs/queue.ts');
+            expect(paths).toContain('src/jobs/worker.ts');
+            expect(paths).toContain('src/jobs/example.job.ts');
+
+            // queue.ts should import from pg-boss
+            const queueFile = files.find(f => f.path === 'src/jobs/queue.ts')!;
+            expect(queueFile.content).toContain('pg-boss');
+
+            // package.json should have pg-boss dependency
+            const pkgFile = files.find(f => f.path === 'package.json')!;
+            expect(pkgFile.content).toContain('"pg-boss"');
+        });
+
+        it('does not generate job files when --jobs is not set', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, defaultOptions, BLOG_SCHEMA);
+            const paths = files.map(f => f.path);
+
+            expect(paths).not.toContain('src/jobs/queue.ts');
+            expect(paths).not.toContain('src/jobs/worker.ts');
+
+            // server.ts should not reference workers
+            const serverFile = files.find(f => f.path === 'src/server.ts')!;
+            expect(serverFile.content).not.toContain('startWorkers');
+        });
+
+        it('generates only job files when --only jobs with --jobs bullmq', async () => {
+            const schema = getParsedSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'jobs', jobs: 'bullmq' }, BLOG_SCHEMA);
+
+            expect(files).toHaveLength(3);
+            const paths = files.map(f => f.path);
+            expect(paths).toContain('src/jobs/queue.ts');
+            expect(paths).toContain('src/jobs/worker.ts');
+            expect(paths).toContain('src/jobs/example.job.ts');
+        });
+    });
+
+    describe('--ws flag', () => {
+        const WS_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.ws
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  createdAt DateTime @default(now())
+}
+
+model Tag {
+  id   String @id @default(cuid())
+  name String
+}
+`;
+
+        function getWsSchema(): ParsedSchema {
+            return parsePrismaAst(WS_SCHEMA);
+        }
+
+        it('generates ws files when --ws is set', async () => {
+            const schema = getWsSchema();
+            const files = await generateProject(schema, { ...defaultOptions, ws: true }, WS_SCHEMA);
+            const paths = files.map(f => f.path);
+
+            expect(paths).toContain('src/ws/ws-types.ts');
+            expect(paths).toContain('src/ws/ws-server.ts');
+            expect(paths).toContain('src/ws/ws-broadcast.ts');
+
+            // server.ts should attach WebSocket server
+            const serverFile = files.find(f => f.path === 'src/server.ts')!;
+            expect(serverFile.content).toContain('setupWebSocketServer');
+
+            // package.json should have ws dependency
+            const pkgFile = files.find(f => f.path === 'package.json')!;
+            expect(pkgFile.content).toContain('"ws"');
+            expect(pkgFile.content).toContain('"@types/ws"');
+
+            // event-bus.ts should be generated (auto-enabled by @bcm.ws)
+            expect(paths).toContain('src/utils/event-bus.ts');
+
+            // ws-broadcast.ts should reference the Post model
+            const broadcastFile = files.find(f => f.path === 'src/ws/ws-broadcast.ts')!;
+            expect(broadcastFile.content).toContain("'Post'");
+            // Tag does NOT have @bcm.ws, so it should not appear
+            expect(broadcastFile.content).not.toContain("'Tag'");
+        });
+
+        it('does not generate ws files when --ws is not set', async () => {
+            const schema = getWsSchema();
+            const files = await generateProject(schema, defaultOptions, WS_SCHEMA);
+            const paths = files.map(f => f.path);
+
+            expect(paths).not.toContain('src/ws/ws-types.ts');
+            expect(paths).not.toContain('src/ws/ws-server.ts');
+            expect(paths).not.toContain('src/ws/ws-broadcast.ts');
+
+            // server.ts should not reference WebSocket
+            const serverFile = files.find(f => f.path === 'src/server.ts')!;
+            expect(serverFile.content).not.toContain('setupWebSocketServer');
+        });
+
+        it('generates only ws files when --only ws with --ws', async () => {
+            const schema = getWsSchema();
+            const files = await generateProject(schema, { ...defaultOptions, only: 'ws', ws: true }, WS_SCHEMA);
+
+            expect(files).toHaveLength(3);
+            const paths = files.map(f => f.path);
+            expect(paths).toContain('src/ws/ws-types.ts');
+            expect(paths).toContain('src/ws/ws-server.ts');
+            expect(paths).toContain('src/ws/ws-broadcast.ts');
+        });
+
+        it('@bcm.ws auto-enables event bus emission in service', async () => {
+            const schema = getWsSchema();
+            const files = await generateProject(schema, { ...defaultOptions, ws: true }, WS_SCHEMA);
+
+            // Post has @bcm.ws — its service should emit events
+            const postService = files.find(f => f.path === 'src/modules/post/post.service.ts')!;
+            expect(postService.content).toContain('eventBus.emit');
+
+            // Tag does NOT have @bcm.ws — its service should NOT emit events
+            const tagService = files.find(f => f.path === 'src/modules/tag/tag.service.ts')!;
+            expect(tagService.content).not.toContain('eventBus.emit');
         });
     });
 

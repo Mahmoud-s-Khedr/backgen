@@ -6,7 +6,7 @@
 export type FieldDirective = 'hidden' | 'readonly' | 'writeOnly' | 'searchable' | 'nested' | 'identifier' | 'password' | 'upload' | 'transform';
 
 /** Directives that apply at the model level */
-export type ModelDirective = 'protected' | 'softDelete' | 'auth' | 'authModel' | 'cache' | 'rateLimit' | 'cursor' | 'event' | 'audit' | 'multitenancy';
+export type ModelDirective = 'protected' | 'softDelete' | 'auth' | 'authModel' | 'cache' | 'rateLimit' | 'cursor' | 'event' | 'audit' | 'multitenancy' | 'ws';
 
 /** Complete parsed schema representation */
 export interface ParsedSchema {
@@ -159,6 +159,10 @@ export interface GenerateOptions {
     json?: boolean;
     /** Target framework: 'express' (default) or 'fastify' */
     framework?: 'express' | 'fastify';
+    /** Background job queue library: 'bullmq' or 'pg-boss' */
+    jobs?: 'bullmq' | 'pg-boss';
+    /** Enable WebSocket support for real-time model events */
+    ws?: boolean;
 }
 
 /** A single file to be written by the generator */
