@@ -255,7 +255,7 @@ describe('<%= model.name %> API', () => {
 <% if (itemSelector) { -%>
   describe('GET ' + existingItemPath, () => {
     it('returns a single record from mocked Prisma', async () => {
-<% if (isSoftDelete) { -%>
+<% if (isSoftDelete || multitenancyConfig) { -%>
       modelDelegate.findFirst.mockResolvedValue(mockRecord(existingKey));
 <% } else { -%>
       modelDelegate.findUnique.mockResolvedValue(mockRecord(existingKey));
@@ -272,7 +272,7 @@ describe('<%= model.name %> API', () => {
     });
 
     it('returns 404 when the mocked record does not exist', async () => {
-<% if (isSoftDelete) { -%>
+<% if (isSoftDelete || multitenancyConfig) { -%>
       modelDelegate.findFirst.mockResolvedValue(null);
 <% } else { -%>
       modelDelegate.findUnique.mockResolvedValue(null);
