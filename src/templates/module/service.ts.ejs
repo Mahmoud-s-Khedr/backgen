@@ -126,6 +126,12 @@ export class <%= model.name %>Service {
   }
 <% } -%>
 
+<% if (multitenancyConfig && itemSelector) { -%>
+  private async findOneForHooks(key: <%= model.name %>Key, tenantId: string): Promise<<%= model.name %> | null> {
+    return this.repo.findOneScoped(key, tenantId);
+  }
+
+<% } -%>
   /**
    * Create a new <%= h.toCamelCase(model.name) %>.
    */
@@ -159,6 +165,45 @@ export class <%= model.name %>Service {
   /**
    * Update a <%= h.toCamelCase(model.name) %> by key.
    */
+<% if (multitenancyConfig) { -%>
+<% if (isAudit) { -%>
+  async update(
+    key: <%= model.name %>Key,
+    data: Create<%= model.name %>Input | Patch<%= model.name %>Input,
+    tenantId: string,
+    changedBy?: string
+  ): Promise<<%= model.name %>> {
+<% } else { -%>
+  async update(
+    key: <%= model.name %>Key,
+    data: Create<%= model.name %>Input | Patch<%= model.name %>Input,
+    tenantId: string
+  ): Promise<<%= model.name %>> {
+<% } -%>
+<% if (isAudit) { -%>
+    const before = await this.findOneForHooks(key, tenantId);
+<% } -%>
+<% if (model.isAuthModel && model.passwordField) { -%>
+    const updateData: Record<string, unknown> = { ...data };
+    if (typeof updateData.<%= model.passwordField %> === 'string') {
+      updateData.<%= model.passwordField %> = await bcrypt.hash(updateData.<%= model.passwordField %> as string, 12);
+    }
+    const result = await this.repo.updateScoped(key, tenantId, updateData);
+<% } else { -%>
+    const result = await this.repo.updateScoped(key, tenantId, data as Record<string, unknown>);
+<% } -%>
+<% if (cacheConfig) { -%>
+    await this.bumpCacheVersion();
+<% } -%>
+<% if (isEvent) { -%>
+    eventBus.emit('<%= model.name %>', 'updated', result);
+<% } -%>
+<% if (isAudit) { -%>
+    await writeAuditLog({ model: '<%= model.name %>', recordId: String((result as any).id ?? ''), action: 'UPDATE', changedBy, before: before as any, after: result as any });
+<% } -%>
+    return result;
+  }
+<% } else { -%>
 <% if (isAudit) { -%>
   async update(key: <%= model.name %>Key, data: Create<%= model.name %>Input | Patch<%= model.name %>Input, changedBy?: string): Promise<<%= model.name %>> {
 <% } else { -%>
@@ -187,10 +232,42 @@ export class <%= model.name %>Service {
 <% } -%>
     return result;
   }
+<% } -%>
 
   /**
    * Delete a <%= h.toCamelCase(model.name) %> by key.
    */
+<% if (multitenancyConfig) { -%>
+<% if (isAudit) { -%>
+  async delete(key: <%= model.name %>Key, tenantId: string, changedBy?: string): Promise<void> {
+<% } else { -%>
+  async delete(key: <%= model.name %>Key, tenantId: string): Promise<void> {
+<% } -%>
+<% if (isAudit || isEvent || (hasUploads)) { -%>
+    const record = await this.findOneForHooks(key, tenantId);
+<% } -%>
+<% if (hasUploads) { -%>
+    if (record) {
+      const { unlink } = await import('fs/promises');
+<%   for (const uf of uploadFields) { -%>
+      if ((record as any).<%= uf.name %>) {
+        await unlink(String((record as any).<%= uf.name %>)).catch(() => {});
+      }
+<%   } -%>
+    }
+<% } -%>
+    await this.repo.deleteScoped(key, tenantId);
+<% if (cacheConfig) { -%>
+    await this.bumpCacheVersion();
+<% } -%>
+<% if (isEvent) { -%>
+    eventBus.emit('<%= model.name %>', 'deleted', record ?? key);
+<% } -%>
+<% if (isAudit) { -%>
+    await writeAuditLog({ model: '<%= model.name %>', recordId: String((key as any).id ?? JSON.stringify(key)), action: 'DELETE', changedBy, before: record as any });
+<% } -%>
+  }
+<% } else { -%>
 <% if (isAudit) { -%>
   async delete(key: <%= model.name %>Key, changedBy?: string): Promise<void> {
 <% } else { -%>
@@ -220,5 +297,6 @@ export class <%= model.name %>Service {
     await writeAuditLog({ model: '<%= model.name %>', recordId: String((key as any).id ?? JSON.stringify(key)), action: 'DELETE', changedBy, before: record as any });
 <% } -%>
   }
+<% } -%>
 <% } -%>
 }

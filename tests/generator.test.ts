@@ -3220,6 +3220,37 @@ model Project {
 }
 `;
 
+        const MULTI_TENANT_ROLE_AUTH_SCHEMA = `
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @bcm.authModel
+model User {
+  id       String @id @default(cuid())
+  /// @bcm.identifier
+  email    String @unique
+  /// @bcm.password
+  password String
+  role     String
+  orgId    String
+}
+
+/// @bcm.multitenancy(field: "orgId")
+/// @bcm.auth(roles: [ADMIN])
+/// @bcm.cursor(field: "id")
+model Project {
+  id    String @id @default(cuid())
+  orgId String
+  name  String
+}
+`;
+
         const MULTI_TENANT_SCHEMA = `
 datasource db {
   provider = "postgresql"
@@ -3292,12 +3323,74 @@ model Project {
             expect(service.content).toContain('orgId: tenantId');
         });
 
+        it('express routes authenticate multitenant reads', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes', framework: 'express' }, MULTI_TENANT_SCHEMA);
+            const routes = files.find((f) => f.path.endsWith('project.routes.ts'))!;
+
+            expect(routes.content).toContain("router.get('/', authenticate, (req, res, next) => controller.list(req, res, next));");
+            expect(routes.content).toContain("router.get('/:id', authenticate, (req, res, next) => controller.getOne(req, res, next));");
+        });
+
+        it('fastify routes authenticate multitenant reads including cursor routes', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_AUTH_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes', framework: 'fastify' }, MULTI_TENANT_AUTH_SCHEMA);
+            const routes = files.find((f) => f.path.endsWith('project.routes.ts'))!;
+
+            expect(routes.content).toContain("fastify.get('/', {");
+            expect(routes.content).toContain("preHandler: [authenticate],");
+            expect(routes.content).toContain("fastify.get('/cursor', {");
+        });
+
+        it('role-gated multitenant reads include authorization middleware', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_ROLE_AUTH_SCHEMA);
+            const expressFiles = await generateProject(schema, { ...defaultOptions, only: 'routes', framework: 'express' }, MULTI_TENANT_ROLE_AUTH_SCHEMA);
+            const fastifyFiles = await generateProject(schema, { ...defaultOptions, only: 'routes', framework: 'fastify' }, MULTI_TENANT_ROLE_AUTH_SCHEMA);
+            const expressRoutes = expressFiles.find((f) => f.path.endsWith('project.routes.ts'))!;
+            const fastifyRoutes = fastifyFiles.find((f) => f.path.endsWith('project.routes.ts'))!;
+
+            expect(expressRoutes.content).toContain("router.get('/', authenticate, authorize('ADMIN'), (req, res, next) => controller.list(req, res, next));");
+            expect(expressRoutes.content).toContain("router.get('/cursor', authenticate, authorize('ADMIN'), (req, res, next) => controller.listCursor(req, res, next));");
+            expect(fastifyRoutes.content).toContain("preHandler: [authenticate, authorize('ADMIN')],");
+        });
+
         it('repository has findOneScoped method', async () => {
             const schema = parsePrismaAst(MULTI_TENANT_SCHEMA);
             const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, MULTI_TENANT_SCHEMA);
             const repo = files.find((f) => f.path.endsWith('project.repository.ts'))!;
             expect(repo.content).toContain('findOneScoped');
             expect(repo.content).toContain('tenantId: string');
+        });
+
+        it('controller, service, and repository scope multitenant update/delete by tenantId', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'routes' }, MULTI_TENANT_SCHEMA);
+            const controller = files.find((f) => f.path.endsWith('project.controller.ts'))!;
+            const service = files.find((f) => f.path.endsWith('project.service.ts'))!;
+            const repo = files.find((f) => f.path.endsWith('project.repository.ts'))!;
+
+            expect(controller.content).toContain('service.update(this.readKeyFromParams(req), req.body as any, this.getTenantId(req))');
+            expect(controller.content).toContain('service.delete(this.readKeyFromParams(req), this.getTenantId(req))');
+            expect(service.content).toContain('tenantId: string');
+            expect(service.content).toContain('this.repo.updateScoped(key, tenantId');
+            expect(service.content).toContain('this.repo.deleteScoped(key, tenantId)');
+            expect(repo.content).toContain('private scopedWhere(key: ProjectKey, tenantId: string)');
+            expect(repo.content).toContain('async updateScoped(key: ProjectKey, tenantId: string, data: Record<string, unknown>)');
+            expect(repo.content).toContain('async deleteScoped(key: ProjectKey, tenantId: string)');
+            expect(repo.content).toContain('Project with key "${this.keyDescription(key)}" not found for tenant "${tenantId}".');
+        });
+
+        it('swagger secures multitenant read operations', async () => {
+            const schema = parsePrismaAst(MULTI_TENANT_ROLE_AUTH_SCHEMA);
+            const files = await generateProject(schema, { ...defaultOptions, only: 'swagger' }, MULTI_TENANT_ROLE_AUTH_SCHEMA);
+            const openapi = JSON.parse(files[0].content);
+
+            expect(openapi.paths['/api/v1/projects'].get.security).toEqual([{ bearerAuth: [] }]);
+            expect(openapi.paths['/api/v1/projects'].get.responses['401']).toBeDefined();
+            expect(openapi.paths['/api/v1/projects'].get.responses['403']).toBeDefined();
+            expect(openapi.paths['/api/v1/projects/{id}'].get.security).toEqual([{ bearerAuth: [] }]);
+            expect(openapi.paths['/api/v1/projects/{id}'].get.responses['401']).toBeDefined();
+            expect(openapi.paths['/api/v1/projects/{id}'].get.responses['403']).toBeDefined();
         });
     });
 

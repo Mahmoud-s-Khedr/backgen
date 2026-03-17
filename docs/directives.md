@@ -73,7 +73,7 @@ model Post {
 
 | Directive | Arguments | Effect |
 |-----------|-----------|--------|
-| `@bcm.protected` | none | Protects mutation routes with authentication middleware. Reads remain public. |
+| `@bcm.protected` | none | Protects mutation routes with authentication middleware. Reads remain public unless tenant-scoped by `@bcm.multitenancy`, which requires auth to resolve tenant context. |
 | `@bcm.softDelete` | none | Turns delete into `deletedAt = new Date()` and filters soft-deleted records from reads. Requires `deletedAt DateTime?`. |
 | `@bcm.auth(roles: [...])` | `roles` array | Protects mutation routes with authentication plus role checks. Requires an auth model with a scalar `role` field. |
 | `@bcm.authModel` | none | Marks the credential model used for generated auth routes. Requires `@bcm.identifier` and `@bcm.password` to generate `/api/v1/auth/*`. |

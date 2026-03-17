@@ -152,6 +152,7 @@ function generateOpenApiSpec(schema: ParsedSchema): OpenApiDocument {
         const tag = model.name;
         const isProtected = model.directives.includes('protected') || model.directives.includes('auth');
         const authRoles = model.authRoles ?? [];
+        const readRequiresAuth = isProtected && !!model.multitenancyConfig;
         const itemSelector = resolveItemSelector(model);
 
         // Build schema components
@@ -227,6 +228,7 @@ function generateOpenApiSpec(schema: ParsedSchema): OpenApiDocument {
             get: {
                 tags: [tag],
                 summary: `List all ${modelPlural}`,
+                ...(readRequiresAuth ? { security: [{ bearerAuth: [] }] } : {}),
                 parameters: [
                     { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
                     { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
@@ -261,6 +263,8 @@ function generateOpenApiSpec(schema: ParsedSchema): OpenApiDocument {
                             },
                         },
                     },
+                    ...(readRequiresAuth ? { '401': { description: 'Unauthorized' } } : {}),
+                    ...(readRequiresAuth && authRoles.length > 0 ? { '403': { description: `Forbidden — requires role: ${authRoles.join(', ')}` } } : {}),
                 },
             },
             post: {
@@ -308,6 +312,7 @@ function generateOpenApiSpec(schema: ParsedSchema): OpenApiDocument {
             get: {
                 tags: [tag],
                 summary: `Get ${modelLower} by key`,
+                ...(readRequiresAuth ? { security: [{ bearerAuth: [] }] } : {}),
                 parameters: [
                     ...itemPathParameters,
                     { name: 'include', in: 'query', schema: { type: 'string' } },
@@ -322,6 +327,8 @@ function generateOpenApiSpec(schema: ParsedSchema): OpenApiDocument {
                         },
                     },
                     '404': { description: 'Not found' },
+                    ...(readRequiresAuth ? { '401': { description: 'Unauthorized' } } : {}),
+                    ...(readRequiresAuth && authRoles.length > 0 ? { '403': { description: `Forbidden — requires role: ${authRoles.join(', ')}` } } : {}),
                 },
             },
             put: {

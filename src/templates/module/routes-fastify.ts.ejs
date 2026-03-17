@@ -19,7 +19,13 @@ const authPreHandlers = isProtected
 const uploadPreHandlers = hasUploads
   ? uploadFields.map((f) => `uploadField('${f.name}', { dest: '${f.uploadConfig?.dest ?? f.name}', maxSize: ${f.uploadConfig?.maxSize ?? 'undefined'}, mimeTypes: ${f.uploadConfig?.mimeTypes ? JSON.stringify(f.uploadConfig.mimeTypes) : 'undefined'} })`)
   : [];
-const readPreHandlerOption = authPreHandlers.length > 0
+const readAuthPreHandlers = multitenancyConfig && authPreHandlers.length > 0
+  ? authPreHandlers
+  : [];
+const readPreHandlerOption = readAuthPreHandlers.length > 0
+  ? `preHandler: [${readAuthPreHandlers.join(', ')}],`
+  : '';
+const deletePreHandlerOption = authPreHandlers.length > 0
   ? `preHandler: [${authPreHandlers.join(', ')}],`
   : '';
 const writePreHandlerOption = authPreHandlers.length > 0
@@ -32,13 +38,26 @@ const writePreValidationPrefix = uploadPreHandlers.length > 0
 
 export async function <%= h.toCamelCase(model.name) %>Routes(fastify: FastifyInstance) {
   // GET /
-  fastify.get('/', async (req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/', {
+    <%- readPreHandlerOption %>
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     return controller.list(req as any, reply as any, (err) => { if (err) throw err; });
   });
 
+<% if (cursorConfig) { -%>
+  // GET /cursor
+  fastify.get('/cursor', {
+    <%- readPreHandlerOption %>
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
+    return controller.listCursor(req as any, reply as any, (err) => { if (err) throw err; });
+  });
+<% } -%>
+
 <% if (itemSelector) { -%>
   // GET /<%= itemPath %>
-  fastify.get('<%= itemPath %>', async (req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('<%= itemPath %>', {
+    <%- readPreHandlerOption %>
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     return controller.getOne(req as any, reply as any, (err) => { if (err) throw err; });
   });
 <% } -%>
@@ -82,7 +101,7 @@ export async function <%= h.toCamelCase(model.name) %>Routes(fastify: FastifyIns
 
   // DELETE /<%= itemPath %>
   fastify.delete('<%= itemPath %>', {
-    <%- readPreHandlerOption %>
+    <%- deletePreHandlerOption %>
   }, async (req: FastifyRequest, reply: FastifyReply) => {
     return controller.remove(req as any, reply as any, (err) => { if (err) throw err; });
   });

@@ -82,6 +82,7 @@ Generated routes mount under `/api/v1/<models>`.
 Behavior depends on directives:
 
 - `@bcm.protected` adds authentication to mutations
+- `@bcm.multitenancy(...)` adds authentication to tenant-scoped reads and writes when tenant context comes from JWT claims
 - `@bcm.auth(...)` adds authentication plus `authorize(...)`
 - `@bcm.upload(...)` adds upload middleware
 - models without selectors get only list/create routes

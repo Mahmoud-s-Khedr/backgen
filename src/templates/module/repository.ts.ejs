@@ -115,16 +115,100 @@ export class <%= model.name %>Repository {
   }
 
 <% if (multitenancyConfig && itemSelector) { -%>
+  private scopedWhere(key: <%= model.name %>Key, tenantId: string) {
+    return { ...this.toWhereUnique(key), <%= multitenancyConfig.field %>: tenantId<% if (isSoftDelete) { %>, deletedAt: null<% } %> };
+  }
+
   async findOneScoped(key: <%= model.name %>Key, tenantId: string, include?: Record<string, boolean>): Promise<<%= model.name %> | null> {
 <% if (includeRelations.length > 0) { -%>
     const normalizedInclude = this.toInclude(include);
 <% } -%>
     return prisma.<%= h.toCamelCase(model.name) %>.findFirst({
-      where: { ...this.toWhereUnique(key), <%= multitenancyConfig.field %>: tenantId<% if (isSoftDelete) { %>, deletedAt: null<% } %> },
+      where: this.scopedWhere(key, tenantId),
 <% if (includeRelations.length > 0) { -%>
       ...(normalizedInclude ? { include: normalizedInclude } : {}),
 <% } -%>
     });
+  }
+
+  async updateScoped(key: <%= model.name %>Key, tenantId: string, data: Record<string, unknown>): Promise<<%= model.name %>> {
+    const where = this.scopedWhere(key, tenantId);
+    const message = `<%= model.name %> with key "${this.keyDescription(key)}" not found for tenant "${tenantId}".`;
+    try {
+<% if (isSoftDelete) { -%>
+      const updated = await prisma.<%= h.toCamelCase(model.name) %>.updateMany({ where, data: data as any });
+      if (updated.count === 0) {
+        throw new ProblemDetail({
+          type: 'not-found', title: 'Not Found', status: 404,
+          detail: message,
+        });
+      }
+      const record = await prisma.<%= h.toCamelCase(model.name) %>.findFirst({ where });
+      if (!record) {
+        throw new ProblemDetail({
+          type: 'not-found', title: 'Not Found', status: 404,
+          detail: message,
+        });
+      }
+      return record;
+<% } else { -%>
+      const record = await prisma.<%= h.toCamelCase(model.name) %>.findFirst({ where });
+      if (!record) {
+        throw new ProblemDetail({
+          type: 'not-found', title: 'Not Found', status: 404,
+          detail: message,
+        });
+      }
+      return await prisma.<%= h.toCamelCase(model.name) %>.update({
+        where: this.toWhereUnique(key),
+        data: data as any,
+      });
+<% } -%>
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2025') {
+        throw new ProblemDetail({
+          type: 'not-found', title: 'Not Found', status: 404,
+          detail: message,
+        });
+      }
+      throw error;
+    }
+  }
+
+  async deleteScoped(key: <%= model.name %>Key, tenantId: string): Promise<void> {
+    const where = this.scopedWhere(key, tenantId);
+    const message = `<%= model.name %> with key "${this.keyDescription(key)}" not found for tenant "${tenantId}".`;
+    try {
+<% if (isSoftDelete) { %>
+      const deleted = await prisma.<%= h.toCamelCase(model.name) %>.updateMany({
+        where,
+        data: { deletedAt: new Date() },
+      });
+      if (deleted.count === 0) {
+        throw new ProblemDetail({
+          type: 'not-found', title: 'Not Found', status: 404,
+          detail: message,
+        });
+      }
+<% } else { %>
+      const record = await prisma.<%= h.toCamelCase(model.name) %>.findFirst({ where });
+      if (!record) {
+        throw new ProblemDetail({
+          type: 'not-found', title: 'Not Found', status: 404,
+          detail: message,
+        });
+      }
+      await prisma.<%= h.toCamelCase(model.name) %>.delete({ where: this.toWhereUnique(key) });
+<% } %>
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2025') {
+        throw new ProblemDetail({
+          type: 'not-found', title: 'Not Found', status: 404,
+          detail: message,
+        });
+      }
+      throw error;
+    }
   }
 
 <% } -%>

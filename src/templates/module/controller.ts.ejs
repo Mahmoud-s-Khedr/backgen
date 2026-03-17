@@ -271,9 +271,17 @@ export class <%= model.name %>Controller {
   async update(req: ControllerRequest, res: ControllerResponse, next: ControllerNext): Promise<void> {
     try {
 <% if (isAudit) { -%>
+<% if (multitenancyConfig) { -%>
+      const result = await service.update(this.readKeyFromParams(req), req.body as any, this.getTenantId(req), this.getChangedBy(req));
+<% } else { -%>
       const result = await service.update(this.readKeyFromParams(req), req.body as any, this.getChangedBy(req));
+<% } -%>
+<% } else { -%>
+<% if (multitenancyConfig) { -%>
+      const result = await service.update(this.readKeyFromParams(req), req.body as any, this.getTenantId(req));
 <% } else { -%>
       const result = await service.update(this.readKeyFromParams(req), req.body as any);
+<% } -%>
 <% } -%>
       sendSuccess(res, <%= model.name %>ResponseSchema.parse(result));
     } catch (error) {
@@ -287,9 +295,17 @@ export class <%= model.name %>Controller {
   async patch(req: ControllerRequest, res: ControllerResponse, next: ControllerNext): Promise<void> {
     try {
 <% if (isAudit) { -%>
+<% if (multitenancyConfig) { -%>
+      const result = await service.update(this.readKeyFromParams(req), req.body as any, this.getTenantId(req), this.getChangedBy(req));
+<% } else { -%>
       const result = await service.update(this.readKeyFromParams(req), req.body as any, this.getChangedBy(req));
+<% } -%>
+<% } else { -%>
+<% if (multitenancyConfig) { -%>
+      const result = await service.update(this.readKeyFromParams(req), req.body as any, this.getTenantId(req));
 <% } else { -%>
       const result = await service.update(this.readKeyFromParams(req), req.body as any);
+<% } -%>
 <% } -%>
       sendSuccess(res, <%= model.name %>ResponseSchema.parse(result));
     } catch (error) {
@@ -303,9 +319,17 @@ export class <%= model.name %>Controller {
   async remove(req: ControllerRequest, res: ControllerResponse, next: ControllerNext): Promise<void> {
     try {
 <% if (isAudit) { -%>
+<% if (multitenancyConfig) { -%>
+      await service.delete(this.readKeyFromParams(req), this.getTenantId(req), this.getChangedBy(req));
+<% } else { -%>
       await service.delete(this.readKeyFromParams(req), this.getChangedBy(req));
+<% } -%>
+<% } else { -%>
+<% if (multitenancyConfig) { -%>
+      await service.delete(this.readKeyFromParams(req), this.getTenantId(req));
 <% } else { -%>
       await service.delete(this.readKeyFromParams(req));
+<% } -%>
 <% } -%>
       sendNoContent(res);
     } catch (error) {

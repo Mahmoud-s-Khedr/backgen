@@ -16,13 +16,26 @@ const controller = new <%= model.name %>Controller();
 <% const roleGuard = authRoles.length > 0 ? `, authorize(${authRoles.map(r => `'${r}'`).join(', ')})` : ''; %>
 <% const uploadMiddlewares = uploadFields.map(f => `uploadField('${f.name}', { dest: '${f.uploadConfig?.dest ?? f.name}', maxSize: ${f.uploadConfig?.maxSize ?? 'undefined'}, mimeTypes: ${f.uploadConfig?.mimeTypes ? JSON.stringify(f.uploadConfig.mimeTypes) : 'undefined'} })`).join(', '); %>
 <% const rlMiddleware = rateLimitConfig ? `createRouteRateLimit(${rateLimitConfig.max}, ${rateLimitConfig.windowMs}), ` : ''; %>
+<% const readAuthMiddleware = multitenancyConfig && isProtected ? `authenticate${roleGuard}` : ''; %>
 
+<% if (readAuthMiddleware) { -%>
+router.get('/', <%- readAuthMiddleware %>, (req, res, next) => controller.list(req, res, next));
+<% } else { -%>
 router.get('/', (req, res, next) => controller.list(req, res, next));
+<% } -%>
 <% if (cursorConfig) { -%>
+<% if (readAuthMiddleware) { -%>
+router.get('/cursor', <%- readAuthMiddleware %>, (req, res, next) => controller.listCursor(req, res, next));
+<% } else { -%>
 router.get('/cursor', (req, res, next) => controller.listCursor(req, res, next));
 <% } -%>
+<% } -%>
 <% if (itemSelector) { -%>
+<% if (readAuthMiddleware) { -%>
+router.get('<%= itemPath %>', <%- readAuthMiddleware %>, (req, res, next) => controller.getOne(req, res, next));
+<% } else { -%>
 router.get('<%= itemPath %>', (req, res, next) => controller.getOne(req, res, next));
+<% } -%>
 <% } -%>
 <% if (isProtected) { %>
 router.post('/', <%- rlMiddleware %>authenticate<%- roleGuard %><% if (hasUploads) { %>, <%- uploadMiddlewares %><% } %>, validate(Create<%= model.name %>Schema), (req, res, next) => controller.create(req, res, next));
