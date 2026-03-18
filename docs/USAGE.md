@@ -41,6 +41,8 @@ For MongoDB, use `pnpm exec prisma db push` instead of `prisma migrate dev`.
 
 ## CLI Reference
 
+Available commands: `init`, `generate`, `add`, `diff`, `validate`, `eject`.
+
 ### `bcm init <project-name>`
 
 Creates a new directory with a starter Prisma schema and minimal project files.
@@ -159,6 +161,112 @@ Failure JSON shape:
 }
 ```
 
+### `bcm add <model>`
+
+Generates a module for one schema model without regenerating the full project.
+
+```bash
+bcm add <model> --schema <path> --output <path> [options]
+```
+
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--schema <path>` | `-s` | Path to the Prisma schema file | required |
+| `--output <path>` | `-o` | Output directory of an existing generated project | required |
+| `--json` | | Emit machine-readable JSON only | `false` |
+| `--force` | | Overwrite existing module directory | `false` |
+| `--framework <name>` | | `express` or `fastify` | `express` |
+
+Important behavior:
+
+- The target model must exist in the schema.
+- Without `--force`, Backgen aborts if the module directory already exists.
+- Backgen can refuse `add` when the model needs shared non-module files; in that case it prints required follow-up `bcm generate --only ...` commands.
+
+Examples:
+
+```bash
+# Add a Comment module
+bcm add Comment --schema ./prisma/schema.prisma --output .
+
+# Force overwrite existing module files
+bcm add Comment --schema ./prisma/schema.prisma --output . --force
+```
+
+Success JSON shape:
+
+```json
+{
+  "success": true,
+  "model": "Comment",
+  "files": [
+    {
+      "path": "src/modules/comment/comment.routes.ts",
+      "sizeBytes": 1423
+    }
+  ]
+}
+```
+
+Failure JSON shape:
+
+```json
+{
+  "success": false,
+  "error": "Model \"Comment\" not found in schema. Available models: User, Post"
+}
+```
+
+### `bcm diff`
+
+Shows what would change if generation is re-run against an existing output directory.
+
+```bash
+bcm diff --schema <path> --output <path> [options]
+```
+
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--schema <path>` | `-s` | Path to the Prisma schema file | required |
+| `--output <path>` | `-o` | Existing generated output directory to compare against | required |
+| `--json` | | Emit machine-readable JSON only | `false` |
+| `--framework <name>` | | `express` or `fastify` | `express` |
+
+Examples:
+
+```bash
+# Human-readable diff summary
+bcm diff --schema ./prisma/schema.prisma --output .
+
+# JSON diff for CI tooling
+bcm diff --schema ./prisma/schema.prisma --output . --json
+```
+
+Success JSON shape:
+
+```json
+{
+  "new": ["src/modules/comment/comment.routes.ts"],
+  "modified": [
+    {
+      "path": "src/app.ts",
+      "hunks": "--- a/src/app.ts\n+++ b/src/app.ts\n..."
+    }
+  ],
+  "identical": ["src/config/env.ts"],
+  "orphaned": ["src/modules/legacy/"]
+}
+```
+
+Failure JSON shape:
+
+```json
+{
+  "success": false,
+  "error": "Output directory not found: /abs/path/project"
+}
+```
+
 ### `bcm validate`
 
 Parses a schema and runs generator validation without writing files.
@@ -225,6 +333,11 @@ Model directives:
 - `@bcm.auth(roles: [...])`
 - `@bcm.authModel`
 - `@bcm.cache(ttl: N)`
+- `@bcm.rateLimit(max: N, window: "1m")`
+- `@bcm.cursor(field: "createdAt")`
+- `@bcm.event`
+- `@bcm.audit`
+- `@bcm.multitenancy(field: "tenantId")`
 - `@bcm.ws`
 
 Field directives:
@@ -237,6 +350,7 @@ Field directives:
 - `@bcm.identifier`
 - `@bcm.password`
 - `@bcm.upload(...)`
+- `@bcm.transform(trim: true, lowercase: true)`
 
 See [Directive Reference](directives.md) for exact placement rules and behavior.
 

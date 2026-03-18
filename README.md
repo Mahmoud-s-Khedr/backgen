@@ -141,6 +141,8 @@ package.json
 - [Architecture Guide](docs/architecture.md)
 - [Playground README](packages/playground/README.md)
 
+CLI command index: `bcm init`, `bcm generate`, `bcm add`, `bcm diff`, `bcm validate`, `bcm eject` (see [Usage Guide](docs/USAGE.md) for full flags and JSON contracts).
+
 ## Playground
 
 The local playground is a separate package that shells out to the real CLI in `--dry-run --json` mode.

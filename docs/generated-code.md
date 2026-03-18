@@ -223,13 +223,18 @@ The generated `server.ts` starts workers after database/Redis connection and shu
 
 ## WebSocket Support
 
-When `--ws` is passed and at least one model has `@bcm.ws`, Backgen generates:
+When `--ws` is passed, Backgen generates:
 
 - `src/ws/ws-types.ts` — typed client/server message definitions (subscribe, unsubscribe, event, error)
 - `src/ws/ws-server.ts` — WebSocket server using the `ws` package, attached to the HTTP server; maintains per-connection subscription registry with heartbeat monitoring
 - `src/ws/ws-broadcast.ts` — bridges the event bus to WebSocket clients; only forwards events for models marked `@bcm.ws`
 
 `@bcm.ws` on a model auto-enables event bus emission in that model's service (equivalent to `@bcm.event`). The `ws-broadcast.ts` module listens to the `*` wildcard on the event bus and sends matching events to subscribed WebSocket clients.
+
+WebSocket generation and broadcasting are intentionally split:
+
+- `--ws` controls whether WebSocket infrastructure files are generated.
+- `@bcm.ws` controls which model events are broadcast to subscribers.
 
 Clients subscribe by sending `{ "type": "subscribe", "model": "Post" }` (or `{ "type": "subscribe", "model": "Post", "id": "abc" }` for single-record subscriptions). The server broadcasts `{ "type": "event", "model": "Post", "action": "created", "data": {...}, "timestamp": "..." }` to matching subscribers.
 

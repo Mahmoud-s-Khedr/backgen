@@ -78,6 +78,12 @@ model Post {
 | `@bcm.auth(roles: [...])` | `roles` array | Protects mutation routes with authentication plus role checks. Requires an auth model with a scalar `role` field. |
 | `@bcm.authModel` | none | Marks the credential model used for generated auth routes. Requires `@bcm.identifier` and `@bcm.password` to generate `/api/v1/auth/*`. |
 | `@bcm.cache(ttl: N)` | `ttl` number | Enables Redis-backed caching for `findMany` and `findOne`, with cache invalidation on mutations. |
+| `@bcm.rateLimit(max: N, window: "1m")` | `max`, `window` | Adds per-route mutation rate limiting for that model. |
+| `@bcm.cursor(field: "createdAt")` | `field` | Adds cursor pagination support and a `GET /cursor` endpoint for the model. |
+| `@bcm.event` | none | Emits typed create/update/delete events on the generated event bus. |
+| `@bcm.audit` | none | Writes audit entries for model mutations and enables shared audit utilities. |
+| `@bcm.multitenancy(field: "tenantId")` | `field` | Enables tenant-scoped query/mutation paths using a tenant claim field from authenticated requests. |
+| `@bcm.ws` | none | Marks the model as WebSocket-broadcasted when WebSocket generation is enabled (`--ws`). |
 
 ### `@bcm.authModel` vs `@bcm.auth(...)`
 
@@ -114,6 +120,7 @@ Login returns:
 | `@bcm.identifier` | none | Marks the login identifier field on the auth model. Must be scalar, non-list, and `@id` or `@unique`. |
 | `@bcm.password` | none | Marks the password field on the auth model. Implies `writeOnly`. |
 | `@bcm.upload(...)` | `dest`, optional `maxSize`, optional `mimeTypes` | Generates upload handling for the field and stores the resolved file path or URL in the DTO/controller flow. |
+| `@bcm.transform(...)` | `trim`, `lowercase`, `uppercase` | Normalizes string input values before persistence/validation flow according to configured flags. |
 
 ### `@bcm.nested`
 
@@ -192,6 +199,89 @@ Generated upload support:
 - Express uses multer-based middleware.
 - Fastify uses `@fastify/multipart`.
 - Local storage and S3-compatible storage are both supported by generated config.
+
+### `@bcm.rateLimit(...)`
+
+Example:
+
+```prisma
+/// @bcm.rateLimit(max: 60, window: "1m")
+model Task {
+  id String @id @default(cuid())
+  title String
+}
+```
+
+Current behavior:
+
+- Applies model-specific write route limits (create/update/patch/delete).
+- `max` defaults to `100` and `window` defaults to `1m` when omitted inside the argument block.
+
+### `@bcm.cursor(...)`
+
+Example:
+
+```prisma
+/// @bcm.cursor(field: "createdAt")
+model Event {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+}
+```
+
+Current behavior:
+
+- Generates cursor-aware repository/service methods for the model.
+- Adds `GET /api/v1/<models>/cursor`.
+- `field` defaults to `"id"` when omitted inside the argument block.
+
+### `@bcm.event` and `@bcm.audit`
+
+```prisma
+/// @bcm.event
+model Order {
+  id String @id @default(cuid())
+}
+
+/// @bcm.audit
+model Invoice {
+  id String @id @default(cuid())
+}
+```
+
+Current behavior:
+
+- `@bcm.event` emits typed mutation events through a generated shared event bus.
+- `@bcm.audit` writes mutation audit records and enables generated audit helpers.
+
+### `@bcm.multitenancy(...)`
+
+Example:
+
+```prisma
+/// @bcm.protected
+/// @bcm.multitenancy(field: "orgId")
+model Project {
+  id    String @id @default(cuid())
+  orgId String
+  name  String
+}
+```
+
+Current behavior:
+
+- Generates tenant-scoped query and item lookup paths using the configured tenant field.
+- `field` defaults to `"tenantId"` when omitted inside the argument block.
+- In protected flows, generated controllers resolve tenant context from authenticated request claims.
+
+### `@bcm.ws`
+
+`@bcm.ws` marks models whose mutation events are forwarded to WebSocket subscribers when generation is run with `--ws`.
+
+Notes:
+
+- `--ws` generates the WebSocket modules.
+- Only models with `@bcm.ws` are broadcast to subscribed clients.
 
 ## Validation Expectations
 

@@ -50,7 +50,8 @@ These are intentional or at least current product boundaries, not validation fai
 
 ### Querying
 
-- Pagination is offset-based (`page` and `limit`), not cursor-based.
+- List endpoints are offset-based by default (`page` and `limit`).
+- Cursor pagination endpoints are generated when a model uses `@bcm.cursor(...)`.
 - Filtering is limited to generated allowed fields.
 - Search uses `search=` across fields marked `@bcm.searchable`.
 
